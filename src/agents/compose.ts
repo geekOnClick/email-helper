@@ -14,9 +14,12 @@ import { Orchestrator } from './orchestrator.js';
 import { createAnalyzer } from './analyzer.js';
 import { createHelper } from './helper.js';
 import { registerMailConnectTools, getSharedSessionStore } from '../tools/mail/register-tools.js';
+import { registerVectorTools } from '../tools/vector/register-tools.js';
 import type { MailAccount } from '../tools/mail/types.js';
 import type { CreateMailProviderOptions } from '../tools/mail/providers/factory.js';
 import type { RouterAiClient } from '../llm/routerai-client.js';
+import type { EmbeddingsClient } from '../llm/embeddings.js';
+import type { FalkorClient } from '../tools/vector/falkor.js';
 import type { Config } from '../config/schema.js';
 
 /** Опции сборки агента. */
@@ -33,6 +36,10 @@ export interface ComposeAgentsOptions {
   tokenStorePath?: string;
   /** Каталог по умолчанию для скачивания вложений. */
   downloadDir?: string;
+  /** Клиент embeddings для векторных тулов (опц.). Если передан — регистрируются embeddings.index/vector.search. */
+  embeddingsClient?: EmbeddingsClient;
+  /** Клиент FalkorDB для векторных тулов (опц.). Если передан — регистрируются embeddings.index/vector.search. */
+  falkorClient?: FalkorClient;
   /** Переопределение лимита итераций (иначе config.AGENT_MAX_ITERATIONS). */
   maxIterations?: number;
   /** Переопределение лимита символов результата тулa. */
@@ -56,6 +63,15 @@ export async function composeAgents(opts: ComposeAgentsOptions): Promise<Orchest
     sessionStore: getSharedSessionStore(),
     downloadDir: opts.downloadDir,
   });
+
+  // 1b. Регистрация векторных тулов — только если оба клиента переданы.
+  if (opts.embeddingsClient && opts.falkorClient) {
+    registerVectorTools({
+      sessionStore: getSharedSessionStore(),
+      embeddingsClient: opts.embeddingsClient,
+      falkorClient: opts.falkorClient,
+    });
+  }
 
   // 2. Субагенты: анализатор + помощник.
   const analyzer = await createAnalyzer({ client: opts.client, config: opts.config });

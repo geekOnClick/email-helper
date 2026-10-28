@@ -142,7 +142,7 @@ describe('FalkorClient', () => {
     const results = await client.searchByEmailVector({
       query: makeVector(),
       k: 5,
-      filter: { prop: 'login', value: 'a@y.com' },
+      filter: { login: 'a@y.com' },
     });
 
     expect(conn.query).toHaveBeenCalledTimes(1);
@@ -151,8 +151,8 @@ describe('FalkorClient', () => {
     expect(String(cypher)).toContain('vecf32($query)');
     expect(params).toMatchObject({
       k: 5,
-      filterProp: 'login',
-      filterValue: 'a@y.com',
+      login: 'a@y.com',
+      folder: null,
     });
     expect(params['query']).toBeInstanceOf(Float32Array);
     expect(results).toHaveLength(1);
@@ -174,6 +174,15 @@ describe('FalkorClient', () => {
   it('повторный ensureSchema не выбрасывает при «index already exists»', async () => {
     const conn = createMockConnection({
       vectorIndexError: new Error('Vector index already exists'),
+    });
+    const client = new FalkorClient({ config: makeConfig(), connection: conn });
+
+    await expect(client.ensureSchema()).resolves.toBeUndefined();
+  });
+
+  it('ensureSchema не выбрасывает при «already indexed» (FalkorDB v7 wire)', async () => {
+    const conn = createMockConnection({
+      vectorIndexError: new Error("Attribute 'embedding' is already indexed"),
     });
     const client = new FalkorClient({ config: makeConfig(), connection: conn });
 

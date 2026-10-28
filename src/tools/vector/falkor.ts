@@ -57,8 +57,8 @@ export interface VectorSearchInput {
   query: number[];
   /** Число ближайших соседей. */
   k: number;
-  /** Опц. фильтр по свойству узла (напр. { prop: 'login', value: 'a@yandex.com' }). */
-  filter?: { prop: string; value: string };
+  /** Опц. фильтр по логину аккаунта и/или папке. */
+  filter?: { login?: string; folder?: string };
 }
 
 /** Найденное письмо с оценкой близости. */
@@ -163,7 +163,7 @@ export class FalkorClient {
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (!/already exists/i.test(msg)) {
+      if (!/already exists|already indexed/i.test(msg)) {
         throw new FalkorError(`FalkorDB: ошибка создания векторного индекса: ${msg}`, { cause: err });
       }
       // Индекс уже существует — идемпотентно ок.
@@ -200,14 +200,15 @@ export class FalkorClient {
     );
   }
 
-  /** Векторный поиск top-k писем (KNN) с опц. фильтром по свойству узла. */
+  /** Векторный поиск top-k писем (KNN) с опц. фильтром по login/folder. */
   async searchByEmailVector(input: VectorSearchInput): Promise<VectorSearchResult[]> {
     const conn = this.requireConnection();
     const reply = await conn.query(
       `
       CALL db.idx.vector.queryNodes('Email', 'embedding', $k, vecf32($query))
       YIELD node, score
-      WHERE $filterProp IS NULL OR node[$filterProp] = $filterValue
+      WHERE ($login IS NULL OR node.login = $login)
+        AND ($folder IS NULL OR node.folder = $folder)
       RETURN node.emailId AS emailId, node.login AS login, node.folder AS folder,
              node.uid AS uid, node.subject AS subject, node.from AS sender,
              node.date AS date, node.snippet AS snippet, score
@@ -216,8 +217,8 @@ export class FalkorClient {
       {
         k: input.k,
         query: new Float32Array(input.query),
-        filterProp: input.filter?.prop ?? null,
-        filterValue: input.filter?.value ?? null,
+        login: input.filter?.login ?? null,
+        folder: input.filter?.folder ?? null,
       },
     );
 

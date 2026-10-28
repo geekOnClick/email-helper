@@ -1,4 +1,4 @@
-# HANDOFF: следующая сессия — Фаза 3 (векторное хранилище и семантический поиск)
+# HANDOFF: следующая сессия — Фаза 3b (semantic-search: тулы над фундаментом)
 
 Проект **email-helper** в `~/Рабочий стол/projects/email-helper`. Разработка по SDD (OpenSpec).
 
@@ -8,167 +8,173 @@
    разделе 8), `openspec/config.yaml` (артефакты на русском, структурные заголовки и
    SHALL/MUST — на английском), и `openspec/changes/archive/` — увидишь стиль SDD-артефактов
    и что уже сделано.
-2. `openspec/specs/` содержит **7 main-спек**: `mail/connection`, `mail/search`,
-   `mail/attachments`, `llm/routerai`, `agent/orchestrator`, `agent/analyzer`,
-   `agent/helper`. `openspec validate --specs --strict` → чисто (7 passed).
-3. **Фаза 0 (bootstrap)** и вся **Фаза 1 (mail-connect, mail-search, mail-attachments)**
-   завершены и заархивированы. Реализованы 5 тулов: `mail.connect`, `mail.listFolders`,
-   `mail.search`, `mail.fetch`, `mail.downloadAttachments` (регистрируются через
-   `src/tools/mail/register-tools.ts` → глобальный реестр `src/tools/registry.ts`, `ToolDef`).
-   Провайдеры: Яндекс (basic/пароль приложения), Outlook (OAuth2 device code flow —
-   basic-auth отключён, см. observation в `archive/2026-10-27-mail-connect/design.md`).
-4. **Фаза 2 ЗАВЕРШЕНА и заархивирована** (4 change'а):
-   a) **llm-client** → `archive/2026-10-28-llm-client/`. OpenAI-совместимый клиент RouterAI
-      в `src/llm/`: `routerai-client.ts` (`RouterAiClient.chat()`: POST `/chat/completions`,
-      injectable fetch, AbortController-таймаут, ретраи 429/5xx/сеть, `redactKey`),
-      `schema.ts` (zod, принимает ОБА формата: v1 `tool_calls[]` и legacy `function_call`,
-      нормализует к `ToolCall`), `tool-mapping.ts` (имя с точкой ↔ подчёркивание,
-      `mapToolsToOpenAi`), `models.ts` (`resolveModel`: явный model > роль > `MODEL_HELPER`),
-      `types.ts`, `index.ts`. Конфиг: `+LLM_REQUEST_TIMEOUT_MS`, `LLM_RETRIES`,
-      `LLM_RETRY_BASE_MS`.
-   b) **orchestrator** → `archive/2026-10-28-orchestrator/`. Каркас в `src/agents/`:
-      `loop.ts` (`runToolLoop` — переиспользуемый движок цикла tool-calling, НЕ зависит от
-      роли/промпта; `RegistryToolResolver`: ошибка-как-результат; `extraTools`; защита от
-      зацикливания), `result-serializer.ts` (`serializeToolResult`), `subagent.ts`
-      (`Subagent`, `SubagentRegistry`, `createDelegateTool`), `orchestrator.ts`
-      (`Orchestrator.create(opts)/run(userText)`, контекст диалога, `delegate` только при
-      непустом реестре), `skill-loader.ts` (`loadSkill`), `index.ts`. Конфиг:
-      `+AGENT_MAX_ITERATIONS` (default 10), `+AGENT_MAX_TOOL_RESULT_CHARS` (default 20000).
-   c) **analyzer-agent** → `archive/2026-10-28-analyzer-agent/`. `src/agents/analyzer.ts`:
-      `Analyzer` (роль `analyzer`, дорогая `MODEL_ANALYZER`) — `Subagent`, крутит свой
-      `runToolLoop` с whitelist `['mail.fetch']`, БЕЗ `delegate`. Фабрика
-      `createAnalyzer(opts): Promise<Subagent>`. Наполнен `skills/analyzer.md`. Решение
-      (design D1): тул `mail.analyze` НЕ вводится — анализ делается самим субагентом через
-      `delegate` + `mail.fetch`.
-   d) **helper-agent** → `archive/2026-10-28-helper-agent/`. `src/agents/helper.ts`:
-      `Helper` (роль `helper`, дешёвая `MODEL_HELPER`) — `Subagent`, крутит свой `runToolLoop`
-      с whitelist всех 5 рутинных тулов, БЕЗ `delegate`. Фабрика `createHelper(opts)`.
-      `src/agents/compose.ts`: `composeAgents(opts)` — единая точка сборки
-      (регистрирует mail-тулы через `registerMailConnectTools` на shared `MailSessionStore`,
-      строит analyzer+helper, возвращает `Orchestrator` с `subagents: [analyzer, helper]`).
-      Наполнен `skills/helper.md`.
-   Контракты: `agent/orchestrator` (глубина делегирования = 1: `delegate` только у
-   оркестратора), `agent/analyzer`, `agent/helper`, `llm/routerai` — все used as-is, НЕ
-   модифицируются в Фазе 3.
-5. **ВАЖНАЯ observation** (в `design.md` заархивированных llm-client/orchestrator/analyzer/
-   helper): живой RouterAI на момент проверки (2026-10-28) отдаёт серверный
-   `{"error":"internal error","code":500}` на `/chat/completions` и `/models` — временное
-   состояние сервиса. Wire-формат `tool_calls` и циклы агентов **НЕ верифицированы против
-   живого API**; построены по контракту OpenAI v1 и покрыты моками (тесты зелёные).
-   Gated-тесты (`INTEGRATION_LLM=1`): `tests/integration/{routerai-chat,orchestrator-loop,
-   analyzer-loop,helper-loop}.test.ts`. **При восстановлении сервиса — повторить gated-тесты
-   и зафиксировать реальный shape в observation.** Это касается и Фазы 3: embeddings-эндпоинт
-   `/embeddings` тоже не верифицирован против живого API — нужен gated-тест.
-6. **Тесты зелёные:** `npm test` → **184 passed / 11 skipped** (37 файлов). Скипы gated:
-   `INTEGRATION_TEST=1` (почта), `INTEGRATION_LLM=1` (LLM/агенты). `tsc`, `lint`,
+2. `openspec/specs/` содержит **9 main-спек**: `mail/connection`, `mail/search`,
+   `mail/attachments`, `llm/routerai`, `llm/embeddings`, `agent/orchestrator`,
+   `agent/analyzer`, `agent/helper`, `storage/falkor`. `openspec validate --specs --strict`
+   → чисто (9 passed).
+3. **Фазы 0, 1, 2 и Фаза 3-фундамент (`vector-store`) ЗАВЕРШЕНЫ и заархивированы.**
+   Реализованы 5 mail-тулов Фазы 1 + LLM-клиент + оркестратор + анализатор + помощник
+   + клиент FalkorDB + клиент embeddings. `git log` → `8f22661 завершена фаза 3`
+   (Фаза 3-фундамент закоммичена) + `c0cbdf0 окончание фазы 2 плана` + `f62f69e initial
+   commit`. Рабочее дерево чистое.
+4. **Фаза 3-фундамент (`vector-store`) → `archive/2026-10-28-vector-store/`.** Реализовано:
+   a) **Клиент embeddings** `src/llm/embeddings.ts`: `EmbeddingsClient.embed(texts:
+      string[]): Promise<number[][]>` — POST `/embeddings`, модель `EMBEDDINGS_MODEL`,
+      injectable `FetchLike`, ретраи 429/5xx/сеть (через экспортированный из
+      `routerai-client.ts` `isRetryableStatus`), AbortController-таймаут, `redactKey`,
+      ранний возврат `[]` для пустого input, нормализация по `index`. zod-схема
+      `embeddingsResponseSchema`. Reuses `RouterAiError` (error-модель несёт
+      status/model/retryAfterMs). Экспорт: `src/llm/index.ts` (+`EmbeddingsClient`,
+      `embeddingsResponseSchema`, типы; `isRetryableStatus` теперь public).
+   b) **Клиент FalkorDB** `src/tools/vector/falkor.ts`: `FalkorClient`
+      (`connect`/`close`/`ensureSchema`/`indexEmail`/`searchByEmailVector`/`clear`),
+      injectable `FalkorConnection` (паттерн `FetchLike`), фабрика `createFalkorConnection`
+      (обёртка над `FalkorDB.connect`+`selectGraph`). Графовая модель: `Email`
+      (`emailId=login:folder:uid`, MERGE-перезапись), `Account`, `Folder`, связи
+      `HAS_FOLDER`/`CONTAINS`. Векторный индекс `createNodeVectorIndex('Email',{dimension:
+      1024, similarityFunction:'cosine'},'embedding')` (ВАЖНО: API `falkordb` v7 —
+      options-объект, КЛАД CONTEXT7-ДОКИ БЫЛИ ДЛЯ СТАРОЙ ВЕРСИИ). KNN:
+      `CALL db.idx.vector.queryNodes('Email','embedding',$k,vecf32($query)) YIELD node,
+      score`. `EMBEDDING_DIM=1024` (bge-m3). `FalkorError`. Экспорт: `src/tools/vector/index.ts`.
+   c) **Конфиг:** выровнен default `FALKORDB_PORT` 6379→6380 в `src/config/schema.ts`
+      (правка конфига, не спеки). Новых полей нет — ретраи/таймаут embeddings
+      переиспользуют `LLM_*`. `falkordb` v7.0.0 добавлена в runtime-зависимости.
+   d) **Тесты:** `tests/embeddings-client.test.ts` (10 unit, мок fetch),
+      `tests/falkor-client.test.ts` (9 unit, мок FalkorConnection),
+      `tests/integration/routerai-embeddings.test.ts` (gated `INTEGRATION_LLM=1`,
+      observation при 500), `tests/integration/falkor-client.test.ts` (gated
+      `INTEGRATION_FALKOR=1`, round-trip — **верифицирован против живого FalkorDB на 6380,
+      зелёный**).
+   e) **Спеки:** созданы main-спеки `storage/falkor` (6 требований) и `llm/embeddings`
+      (5 требований), синхронизированы при archive.
+   f) **API-нюанс `falkordb` v7:** вектор в Cypher передаётся параметром `Float32Array`
+      (клиент сериализует в list `vecf32($embedding)`); в `WHERE node[$filterProp] =
+      $filterValue` фильтр — `filterProp IS NULL OR ...`.
+5. **ВАЖНАЯ observation (продолжает действовать):** живой RouterAI на момент проверки
+   (2026-10-29) отдаёт серверный `{"error":"internal error","code":500}` на
+   `/chat/completions`, `/models` И `/embeddings` — временное состояние сервиса. Wire-форматы
+   `tool_calls` и `/embeddings` **НЕ верифицированы против живого API**; построены по
+   контракту OpenAI v1 и покрыты моками (тесты зелёные). `INTEGRATION_LLM=1`-тесты
+   (`routerai-chat`, `routerai-embeddings`, `orchestrator-loop`, `analyzer-loop`,
+   `helper-loop`) проверены 2026-10-29 — все проходят с observation (500). **При
+   восстановлении сервиса — повторить gated-тесты и зафиксировать реальный shape в
+   observation.** Embeddings-клиент и FalkorDB-клиент готовы; wire-формат `/embeddings`
+   проверится gated-тестом `routerai-embeddings.test.ts` при восстановлении.
+6. **Тесты зелёные:** `npm test` → **203 passed / 13 skipped** (41 файл). Скипы gated:
+   `INTEGRATION_TEST=1` (почта), `INTEGRATION_LLM=1` (LLM/агенты/embeddings),
+   `INTEGRATION_FALKOR=1` (FalkorDB — проходит зелёным против живой БД). `tsc`, `lint`,
    `openspec validate --specs --strict` — чисто.
-7. **Git-состояние (чисто):** `git log` → `c0cbdf0 окончание фазы 2 плана` (Фаза 2
-   закоммичена) + `f62f69e initial commit` (Фазы 0+1). Рабочее дерево чистое. Перед стартом
-   Фазы 3 коммитить ничего не нужно.
+7. **Git-состояние (чисто):** `git log` → `8f22661 завершена фаза 3` (Фаза 3-фундамент
+   закоммичен) + 2 предыдущих коммита. Рабочее дерево чистое. Перед стартом `semantic-search`
+   коммитить ничего не нужно.
 8. **Runtime-состояние (вне git, локально):**
    - **FalkorDB поднят в docker**, контейнер `email-helper-falkordb`, **порт 6380**, статус
      `Up (healthy)`. Поднять/переподнять: `docker compose -f docker/docker-compose.yml up -d`.
-     Пароль `falkordb` (по умолчанию). Персистентность через volume `falkordb_data`.
+     Пароль `falkordb`. Персистентность через volume `falkordb_data`.
    - Outlook OAuth2 авторизован — refresh token в `.tokens/oauth.json`.
-   - Реальные аккаунты и пароль приложения Яндекс — в `.env` (код читает через
-     `loadConfigWithAccounts()`).
-   - `MS_CLIENT_ID` в `.env.example` — public client_id Thunderbird (`9e5f94bc-...`).
+   - Реальные аккаунты и пароль приложения Яндекс — в `.env` (через `loadConfigWithAccounts()`).
    - `ROUTERAI_API_KEY` в `.env` (валидный, но сервис временно 500).
-   - `EMBEDDINGS_MODEL=baai/bge-m3` в `.env.example` и в `ConfigSchema` (default).
-   - **⚠️ Несоответствие порта FalkorDB:** `docker-compose.yml` маппит `${FALKORDB_PORT:-6380}:6379`,
-     `.env.example` задаёт `FALKORDB_PORT=6380`, но в `ConfigSchema` default `6379`
-     (`src/config/schema.ts:45`). Локально `.env` задаёт 6380, так что рабочий конфиг
-     корректен, но default в schema расходится с compose — при дизайне FalkorDB-клиента
-     учти, что подключаться надо на `config.FALKORDB_PORT` (из `.env` = 6380), а не на
-     хардкод. Можно заодно выровнять default в schema на 6380 (modified capability? — нет,
-     это конфиг, не спека; просто правка `schema.ts`, если решишь).
-9. **Что уже есть под Фазу 3 (заглушки/сеймы):**
-   - `src/tools/vector/index.ts` — заглушка `export {}` (Фаза 3 наполнит: `falkor.ts`,
-     `embeddings.ts`, `search.ts` по структуре PLAN.md раздел 4).
-   - В `src/llm/` **нет embeddings-клиента** — Фаза 3 создаст (напр. метод `embed()` в
-     `RouterAiClient` или отдельный клиент на тот же baseUrl + ключ, POST `/embeddings`,
-     модель `EMBEDDINGS_MODEL=baai/bge-m3`). Решение — в design.
-   - `falkordb` npm-пакет **НЕ установлен** — Фаза 3 добавит зависимость (`npm i falkordb`).
-     Это первая новая runtime-зависимость со времён Фазы 0 — зафиксируй в proposal Impact.
-   - `HELPER_TOOLS` whitelist в `src/agents/helper.ts` сейчас = 5 тулов Фазы 1. Новые тулы
-     Фазы 3 (`embeddings.index`, `vector.search`) — добавятся в whitelist помощника
-     (по PLAN.md раздел 3.2 они субагента-помощника). Это modified capability `agent/helper`
-     или новый capability? — реши в proposal.
-10. **SDD-цикл:** `/opsx-propose <change>` → `/opsx-apply` → `/opsx-archive`. Slash-команды pi
-    (`.pi/prompts/opsx-*.md`), под капотом — openspec CLI (установлен глобально, v1.14.3;
-    PATH может не содержать — добавляй `/home/geekonclick/.nvm/versions/node/v22.11.0/bin`).
-    Стиль артефактов и modified/new capability pattern — см. `archive/` (особенно последние
-    два change'а `analyzer-agent`/`helper-agent` — ближе всего по структуре: субагент +
-    фабрика + тул-набор).
+   - `EMBEDDINGS_MODEL=baai/bge-m3` (1024 dim) в `.env.example` и `ConfigSchema` (default).
+9. **Что готово под `semantic-search` (фундамент в `src/tools/vector/` и `src/llm/`):**
+   - `FalkorClient` (граф, MERGE-индексация, KNN-поиск с фильтром, `clear`) — готов к
+     использованию тулами `embeddings.index` и `vector.search`.
+   - `EmbeddingsClient.embed(texts)` — готов (но live API пока 500; мок в тестах).
+   - `IndexEmailInput` (`emailId`, `login`, `folder`, `uid`, `subject`, `from`, `date`,
+     `snippet`, `embedding: number[]`), `VectorSearchInput` (`query`, `k`, `filter?`),
+     `VectorSearchResult`.
+   - `src/types/email.ts`: `EmailFull` (`body`, `subject`, `folder`, `uid`, `from`, `date`) —
+     что индексируем: тема + тело → snippet + embedding.
+   - `src/tools/mail/mail-fetch.tool.ts` возвращает `EmailFull` (источник данных для индексации).
+   - `src/agents/helper.ts` (`HELPER_TOOLS` whitelist) + `src/agents/compose.ts`
+     (точка сборки) — куда добавятся новые тулы.
+   - `src/tools/registry.ts` (`ToolDef`, `registerTool`) — фактический реестр тулов.
+10. **Готовый фундамент (чаще всего НЕ модифицируется в `semantic-search`):** `llm/routerai`,
+    `llm/embeddings`, `storage/falkor`, `agent/orchestrator`, `agent/analyzer` — used as-is.
+11. **SDD-цикл:** `/opsx-propose <change>` → `/opsx-apply` → `/opsx-archive`. Slash-команды pi
+    (`.pi/prompts/opsx-*.md`), под капотом — openspec CLI (v1.14.3; PATH может не содержать —
+    добавляй `/home/geekonclick/.nvm/versions/node/v22.11.0/bin`). Стиль артефактов и
+    modified/new capability pattern — см. `archive/` (особенно последние два change'а
+    `analyzer-agent`/`helper-agent` — ближе всего по структуре: субагент + фабрика + тул-набор;
+    `vector-store` — образец injectable-клиента + gated-тест).
 
-## Задача: Фаза 3 (PLAN.md раздел 5, строка 236)
+## Задача: Фаза 3b — `semantic-search` (PLAN.md раздел 3.2, 5)
 
-**Цель:** индексация писем в FalkorDB, поиск по смыслу.
+**Цель:** тулы `embeddings.index` и `vector.search` над готовым фундаментом
+(`FalkorClient` + `EmbeddingsClient`), гибридный поиск, подключение помощника.
 
-Область Фазы 3 (по PLAN.md):
-- Клиент FalkorDB (`falkordb` npm), соединение из Docker (порт 6380).
-- Графовая модель: узел `Email` (id, тема, дата, отправитель, папка) + связь к
-  `Account`/`Folder`.
-- Векторный индекс над embedding тела/темы письма.
-- `embeddings.index` (RouterAI embeddings через `baai/bge-m3`).
-- `vector.search` — семантический поиск писем.
-- Гибридный поиск: критерии (фильтры) + векторная близость.
-- Тесты с встроенным/тестовым FalkorDB.
+Область (по PLAN.md раздел 3.2 + 5):
+- **Тул `embeddings.index`**: принимает письмо (`login`, `uid`, `folder`?) → `mail.fetch`
+  (EMailFull) → собрать текст (тема + тело) → `EmbeddingsClient.embed([text])` →
+  `FalkorClient.indexEmail({...})`. Либо принимает готовый текст/письмо напрямую — реши в design.
+- **Тул `vector.search`**: принимает запрос (строка) + опц. фильтры → `EmbeddingsClient.embed
+  ([query])` → `FalkorClient.searchByEmailVector({query, k, filter})` → вернуть
+  метаданные+score.
+- **Гибридный поиск**: критерии (фильтры по папке/аккаунту/дате) + векторная близость.
+  `FalkorClient.searchByEmailVector` уже умеет фильтр по одному свойству — расширить?
+  Решить в design (множественные фильтры в Cypher WHERE).
+- **Подключение помощника**: добавить `embeddings.index`, `vector.search` в `HELPER_TOOLS`
+  whitelist (`src/agents/helper.ts`). Это modified capability `agent/helper` (расширить
+  требование «Набор рутинных тулов без делегирования»)? — реши в proposal: спека `agent/helper`
+  говорит «рутины (подключение, поиск, чтение, скачивание)» абстрактно; векторные тулы —
+  новый вид рутины. См. `archive/2026-10-28-helper-agent/design.md` (D2 whitelist).
 
-**SDD-изменения по PLAN.md:** `vector-store`, `semantic-search` (capabilities:
-`storage/falkor`, `mail/semantic-search`).
+**SDD-изменение:** `semantic-search` (capability: `mail/semantic-search` + возможно
+modified `agent/helper`). PLAN.md раздел 5 говорит про capability `mail/semantic-search`.
 
 ### Ключевые архитектурные вопросы (уточни в proposal/design)
 
-- **Дробление Фазы 3 на change'ы.** PLAN.md предлагает два: `vector-store`
-  (capability `storage/falkor`) и `semantic-search` (capability `mail/semantic-search`).
-  `vector-store` — FalkorDB-клиент + графовая модель + векторный индекс + embeddings-клиент
-  (фундамент); `semantic-search` — тулы `embeddings.index` и `vector.search` + гибридный
-  поиск (поверх фундамента). **Начни с `vector-store`** (он разблокирует второй). Реши в
-  proposal, входит ли embeddings-клиент в `vector-store` или в `semantic-search` —
-  обоснованно.
-- **Embeddings-клиент.** Новый метод в `RouterAiClient` (`embed(texts): Promise<number[][]>`,
-  POST `/embeddings`, модель `EMBEDDINGS_MODEL`) ИЛИ отдельный модуль `src/llm/embeddings.ts`.
-  Это modified capability `llm/routerai` (добавляется требование embeddings) или новый
-  capability `llm/embeddings`? — если отдельный модуль без изменения контракта
-  `RouterAiClient.chat()`, то новый. Зафиксируй решение в design (D-пункт).
-- **FalkorDB-клиент.** Где живёт: `src/tools/vector/falkor.ts` (по PLAN.md структуре) ИЛИ
-  `src/storage/falkor.ts` (отдельный слой хранилища, не «тул»)? Тулы (`embeddings.index`,
-  `vector.search`) — в `src/tools/vector/`, поверх клиента. Решение — в design.
-- **Подключение помощника.** Новые тулы `embeddings.index`, `vector.search` — субагента
-  помощника (PLAN.md раздел 3.2). Добавляются в `HELPER_TOOLS` whitelist
-  (`src/agents/helper.ts`). Это modified capability `agent/helper` (меняется набор тулов)?
-  — по контракту `agent/helper` спека требует «рутинные тулы (подключение, поиск, чтение,
-  скачивание)»; векторные тулы — это тоже рутина помощника, но новый вид. Реши: modified
-  `agent/helper` (расширить требование «Набор рутинных тулов без делегирования» сценарием
-  векторных тулов) ИЛИ оставить спеку `agent/helper` как есть (whitelist — реализационная
-  деталь, спека говорит «рутинные тулы» абстрактно). Если спека не меняется — `skip_specs`
-  для `agent/helper` части не нужен, просто правка кода.
-- **Тесты.** FalkorDB поднят локально (порт 6380, healthy) — можно писать gated-тест
-  (`INTEGRATION_FALKOR=1`) против живого FalkorDB (аналог `INTEGRATION_LLM=1`/`INTEGRATION_TEST=1`).
-  Unit-тесты — с моком FalkorDB-клиента (injectable, как `FetchLike` в `RouterAiClient`).
-  Embeddings-клиент — мок (возвращаем предопределённые векторы), gated-тест
-  (`INTEGRATION_LLM=1`) против живого RouterAI `/embeddings` (если сервис восстановится).
+- **Что индексируем.** PLAN.md раздел 8.4: «тема + тело (текст)». Сниппет (обрезка тела ~500
+  символов, как в `IndexEmailInput.snippet`) — для хранения в графе. В embedding идёт
+  тема + тело (или тема + snippet — реши: полный текст точнее, но длиннее; bge-m3 до 8192
+  токенов — тело влезает). см. `src/types/email.ts` (`EmailFull.body`, `EmailFull.subject`).
+- **Интеграция в compose.** Тул `embeddings.index` должен дёргать `mail.fetch` (тул из
+  реестра) ИЛИ принимать готовый `EmailFull`? — design. Тул зависит от `EmbeddingsClient`+
+  `FalkorClient` (новые зависимости, которых нет в `composeAgents` сейчас — туда передастся
+  `FalkorClient`/`EmbeddingsClient`). Решить, кто создаёт клиентов (`composeAgents` или
+  фабрика тулов) — симметрично `mail.connect`.
+- **Доступ к `mail.fetch` из тулa `embeddings.index`.** Тул `embeddings.index` принимает
+  `login`+`uid`+`folder` → зовёт `mail.fetch` handler (через `sessionStore`? через
+  `getTool('mail.fetch')`?). Или принимает уже готовое тело? — design.
+- **Вектор запроса в `vector.search`.** `vector.search` должен сам строить embedding
+  запроса (через `EmbeddingsClient.embed([query])`) → значит тул зависит от
+  `EmbeddingsClient`. Решить в design.
+- **Гибридный поиск.** В PLAN.md — «критерии (фильтры) + векторная близость». `FalkorClient`
+  `searchByEmailVector` принимает единственный `filter: {prop, value}`. Расширить
+  `VectorSearchInput` (массив фильтров, дата?) — design. Либо фильтр оставляем простым,
+  гибрид = KNN + опц. один фильтр. Решить.
+- **Тесты.** FalkorDB-клиент верифицирован (`INTEGRATION_FALKOR=1` зелёный), но тул `embeddings.index`
+  зависит ещё от `mail.fetch` (нужен мок sessionStore или stub `mail.fetch` тулa, паттерн
+  `tests/helper.test.ts`). `vector.search` — мок `EmbeddingsClient`+`FalkorClient`.
+  Gated-тест на live RouterAI+ FalkorDB — только после восстановления сервиса.
 
 ### Старт
 
-**Начни с `/opsx-propose vector-store`.** Перед proposal прочитай:
+**Начни с `/opsx-propose semantic-search`.** Перед proposal прочитай:
 
-- `PLAN.md` раздел 5 (Фаза 3, строка 236) + раздел 3.2 (тулы `embeddings.index`,
-  `vector.search`) + раздел 8.4 (объём писем, что индексируем: тема + тело).
-- `src/llm/routerai-client.ts` (паттерн injectable `FetchLike`, ретраи, redact — образец
-  для embeddings-клиента), `src/llm/types.ts`, `src/llm/models.ts`, `src/llm/index.ts`.
-- `src/tools/vector/index.ts` (заглушка), `src/tools/registry.ts` (`ToolDef`, `registerTool`).
-- `src/agents/helper.ts` (`HELPER_TOOLS` whitelist), `src/agents/compose.ts` (как тулы
-  регистрируются и субагенты подключаются — `vector-store` не должен ломать этот seam).
-- `src/config/schema.ts` (поля `FALKORDB_HOST/PORT/PASSWORD`, `EMBEDDINGS_MODEL` —
-  обратить внимание на несоответствие default порта 6379 vs compose 6380).
-- `docker/docker-compose.yml` (порт 6380, пароль, персистентность).
-- `src/types/email.ts` (`EmailFull`, `EmailMessage` — что индексируем: тема + тело).
-- `openspec/specs/llm/routerai/spec.md` (контракт, чтоб понять, modified или new capability
-  для embeddings), `openspec/specs/agent/helper/spec.md` (whitelist контракта).
-- `archive/2026-10-28-llm-client/` (ближайший стиль для клиента с injectable transport +
-  ретраи), `archive/2026-10-28-helper-agent/` (ближайший стиль для modified-vs-new
-  capability решения и тул-набора).
-- `tests/llm-client.test.ts` (паттерн мока fetch для embeddings-клиента),
-  `tests/integration/routerai-chat.test.ts` (паттерн gated-теста с observation при 500).
+- `PLAN.md` раздел 3.2 (тулы `embeddings.index`, `vector.search`), раздел 5 (Фаза 3),
+  раздел 8.4 (что индексируем: тема + тело), раздел 6 (Фаза 3 после Фазы 2).
+- `src/tools/vector/falkor.ts` (`FalkorClient`, `IndexEmailInput`, `VectorSearchInput`,
+  `VectorSearchResult`, `EMBEDDING_DIM`), `src/tools/vector/index.ts` (экспорты).
+- `src/llm/embeddings.ts` (`EmbeddingsClient.embed`), `src/llm/index.ts` (экспорты).
+- `src/tools/mail/mail-fetch.tool.ts` (источник `EmailFull` для индексации), `src/types/email.ts`
+  (`EmailFull.body`/`subject`).
+- `src/tools/registry.ts` (`ToolDef`, `registerTool`), `src/tools/mail/register-tools.ts`
+  (паттерн регистрации тулов с deps).
+- `src/agents/helper.ts` (`HELPER_TOOLS` whitelist), `src/agents/compose.ts` (точка сборки,
+  куда передать FalkorClient/EmbeddingsClient).
+- `archive/2026-10-28-helper-agent/` (паттерн whitelist тулов + modified-vs-new capability),
+  `archive/2026-10-28-vector-store/` (ближайший стиль, injectable-клиенты).
+
+## ⚠️ Runtime-блокер
+
+Живой RouterAI отдаёт **500** на `/chat/completions` и `/embeddings`. Это значит:
+- Тулы `embeddings.index`/`vector.search` построить можно (на моках), но **end-to-end не
+  проверить** до восстановления сервиса.
+- Gated-тест `INTEGRATION_LLM=1` для embeddings-клиента (и будущего тулa) провален в
+  observation (500) — это ожидаемое поведение gated-теста, не ошибка.
+- Проверь перед стартом: `source .env && curl -s -X POST "$ROUTERAI_BASE_URL/embeddings"
+  -H "Authorization: Bearer $ROUTERAI_API_KEY" -H "Content-Type: application/json" -d
+  '{"model":"baai/bge-m3","input":"test"}'` — если вернёт 200/вектор — сервис восстановился,
+  повтори gated-тесты и зафиксируй wire-формат в observation.
+- FalkorDB при этом работает (6380, healthy, gated-тест зелёный) — векторный round-trip
+  проверен.
