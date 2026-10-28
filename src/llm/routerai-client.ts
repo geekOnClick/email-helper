@@ -255,7 +255,7 @@ export class RouterAiClient {
 }
 
 /** Повторяем ли HTTP-статус: 429 и 5xx — да, остальное (включая отсутствие статуса) — нет. */
-function isRetryableStatus(status: number | undefined): boolean {
+export function isRetryableStatus(status: number | undefined): boolean {
   if (status === undefined) return false;
   return status === 429 || status >= 500;
 }

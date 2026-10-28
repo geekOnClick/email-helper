@@ -42,7 +42,7 @@ export const ConfigSchema = z.object({
 
   // === FalkorDB ===
   FALKORDB_HOST: z.string().default('localhost'),
-  FALKORDB_PORT: z.coerce.number().int().positive().default(6379),
+  FALKORDB_PORT: z.coerce.number().int().positive().default(6380),
   FALKORDB_PASSWORD: z.string().default(''),
 
   // === Аккаунты и пути ===
