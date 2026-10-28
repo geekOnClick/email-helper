@@ -1,0 +1,44 @@
+# === Секреты и учётные данные — НИКОГДА в git ===
+agent-accounts.txt
+.env
+.env.*
+!.env.example
+*.local
+secrets/
+**/credentials.json
+# OAuth2-токены (refresh token) — локальное хранилище вне git
+.tokens/
+oauth.json
+
+# Тестовые артефакты
+tests/fixtures/attachments/*
+!tests/fixtures/attachments/.gitkeep
+
+# === Node / TypeScript ===
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.npm/
+
+# === Инструменты ===
+coverage/
+.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === IDE / ОС ===
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# === OpenSpec (временные/локальные) ===
+# сами спеки хранятся в репозитории, но служебные кэши — нет
+.openspec-cache/
+
+# === FalkorDB локальные данные ===
+docker/data/
