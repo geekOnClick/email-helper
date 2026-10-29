@@ -10,6 +10,8 @@
   "scripts": {
     "build": "tsc",
     "start": "tsx src/index.ts",
+    "mcp": "tsx src/mcp/index.ts",
+    "mcp:http": "tsx src/mcp/index.ts --http",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -34,6 +36,7 @@
     "vitest": "5.0.5"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "dotenv": "18.0.9",
     "falkordb": "^7.0.0",
     "imapflow": "^2.9.1",
