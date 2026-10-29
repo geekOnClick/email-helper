@@ -13,6 +13,7 @@ import type {
   ChatMessage,
   ToolCall,
   ToolChoice,
+  ToolProgressEvent,
   ToolResultMessage,
   Usage,
 } from '../llm/types.js';
@@ -45,6 +46,8 @@ export interface ToolLoopOptions {
   maxToolResultChars: number;
   /** Роль агента для запроса к LLM (опц.; передаётся клиенту). */
   role?: AgentRole;
+  /** Наблюдатель прогресса цикла (опц.): испускает события по тулам и усечению. */
+  onToolEvent?: (event: ToolProgressEvent) => void;
 }
 
 /** Результат цикла tool-calling. */
@@ -64,6 +67,24 @@ export interface ToolLoopResult {
 /** Строит сообщение с результатом/ошибкой тулa. */
 function toolResultMessage(toolCallId: string, content: string): ToolResultMessage {
   return { role: 'tool', toolCallId, content };
+}
+
+/** Лимит символов в кратком summary прогресса тулa (для наблюдателя). */
+const PROGRESS_SUMMARY_CHARS = 200;
+
+/** Строит краткое summary результата тулa для события прогресса. */
+function progressSummary(content: string): string {
+  if (content.length <= PROGRESS_SUMMARY_CHARS) return content;
+  return content.slice(0, PROGRESS_SUMMARY_CHARS) + '…';
+}
+
+/** Признаки начала строки-ошибки из resolver'а (ok=false для события прогресса). */
+function isToolError(content: string): boolean {
+  return (
+    content.startsWith('Ошибка тулa') ||
+    content.startsWith('Невалидные аргументы тулa') ||
+    content.startsWith('Тул не найден')
+  );
 }
 
 /**
@@ -151,13 +172,29 @@ export async function runToolLoop(opts: ToolLoopOptions): Promise<ToolLoopResult
     });
 
     for (const toolCall of result.toolCalls) {
+      if (opts.onToolEvent) {
+        opts.onToolEvent({ type: 'toolCall', iteration, toolCall });
+      }
       const toolMsg = await resolver.resolve(toolCall);
       opts.messages.push(toolMsg);
+      if (opts.onToolEvent) {
+        opts.onToolEvent({
+          type: 'toolResult',
+          iteration,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          ok: !isToolError(toolMsg.content),
+          summary: progressSummary(toolMsg.content),
+        });
+      }
     }
 
     // Если это была последняя разрешённая итерация — модель всё ещё зовёт тулы.
     if (iteration === opts.maxIterations - 1) {
       truncated = true;
+      if (opts.onToolEvent) {
+        opts.onToolEvent({ type: 'truncated', iterations: opts.maxIterations });
+      }
       break;
     }
   }

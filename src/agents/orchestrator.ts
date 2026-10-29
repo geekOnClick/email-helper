@@ -20,6 +20,7 @@ import type { Config } from '../config/schema.js';
 import type {
   ChatMessage,
   ToolCall,
+  ToolProgressEvent,
   Usage,
 } from '../llm/types.js';
 
@@ -61,6 +62,7 @@ export class Orchestrator {
   private readonly maxIterations: number;
   private readonly maxToolResultChars: number;
   private readonly messages: ChatMessage[];
+  private readonly systemPrompt: string;
   private readonly openAiTools: ReturnType<typeof mapToolsToOpenAi>;
   private readonly subagentRegistry: SubagentRegistry;
   private readonly delegateTool: ToolDef | null;
@@ -85,6 +87,7 @@ export class Orchestrator {
     if (this.delegateTool) domainTools.push(this.delegateTool);
     this.openAiTools = mapToolsToOpenAi(domainTools);
 
+    this.systemPrompt = systemPrompt;
     this.messages = [{ role: 'system', content: systemPrompt }];
   }
 
@@ -95,7 +98,10 @@ export class Orchestrator {
   }
 
   /** Прогоняет реплику пользователя через цикл tool-calling. */
-  async run(userText: string): Promise<OrchestratorResult> {
+  async run(
+    userText: string,
+    opts?: { onToolEvent?: (event: ToolProgressEvent) => void },
+  ): Promise<OrchestratorResult> {
     this.messages.push({ role: 'user', content: userText });
 
     const loopResult = await runToolLoop({
@@ -106,6 +112,7 @@ export class Orchestrator {
       maxToolResultChars: this.maxToolResultChars,
       role: 'orchestrator',
       extraTools: this.delegateTool ? [this.delegateTool] : [],
+      onToolEvent: opts?.onToolEvent,
     });
 
     // Дополняем историю финальным assistant-ответом (без tool_calls).
@@ -128,5 +135,14 @@ export class Orchestrator {
   /** Набор тулов, передаваемых модели (для инспекции/тестов). */
   getOpenAiTools(): ReturnType<typeof mapToolsToOpenAi> {
     return this.openAiTools;
+  }
+
+  /**
+   * Сбрасывает историю диалога до системного промпта (тулы/субагенты остаются).
+   * Для транспорта: /reset обнуляет контекст без пересборки агента.
+   */
+  resetHistory(): void {
+    this.messages.length = 0;
+    this.messages.push({ role: 'system', content: this.systemPrompt });
   }
 }

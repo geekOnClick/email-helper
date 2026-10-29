@@ -20,6 +20,46 @@ export interface ToolCall {
   parseError?: string;
 }
 
+/**
+ * Событие прогресса цикла tool-calling для наблюдателя (Фаза 5, change cli-transport).
+ * Discriminated union по `type`: испускается циклом при наличии onToolEvent.
+ */
+export type ToolProgressEvent =
+  | ToolCallEvent
+  | ToolResultEvent
+  | TruncatedEvent;
+
+/** Событие: модель вызвала тул (вызов зафиксирован в истории). */
+export interface ToolCallEvent {
+  type: 'toolCall';
+  /** Номер итерации цикла (0-индексация). */
+  iteration: number;
+  /** Вызов тулa из ответа модели. */
+  toolCall: ToolCall;
+}
+
+/** Событие: тул исполнен, есть результат или ошибка. */
+export interface ToolResultEvent {
+  type: 'toolResult';
+  /** Номер итерации цикла (0-индексация). */
+  iteration: number;
+  /** Идентификатор вызова, к которому относится результат. */
+  toolCallId: string;
+  /** Имя исполненного тулa. */
+  toolName: string;
+  /** Успешно ли исполнение (false — ошибка/невалидные args/тул не найден). */
+  ok: boolean;
+  /** Краткое строковое представление результата или ошибки. */
+  summary: string;
+}
+
+/** Событие: цикл прерван по лимиту итераций. */
+export interface TruncatedEvent {
+  type: 'truncated';
+  /** Число выполненных итераций (= maxIterations). */
+  iterations: number;
+}
+
 /** Сообщение системного промпта. */
 export interface SystemMessage {
   role: 'system';
