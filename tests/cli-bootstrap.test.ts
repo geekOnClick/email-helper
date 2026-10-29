@@ -31,14 +31,18 @@ function makeEnv(overrides: Partial<NodeJS.ProcessEnv> = {}): NodeJS.ProcessEnv 
 describe('bootstrap (сборка агента из конфига)', () => {
   beforeEach(() => resetTools());
 
-  it('валидный конфиг → агент собран (оркестратор с delegate)', async () => {
-    const { orchestrator } = await bootstrap({
+  it('валидный конфиг → агент собран (оркестратор с delegate + analyzer + accounts)', async () => {
+    const { orchestrator, analyzer, accounts, downloadDir } = await bootstrap({
       env: makeEnv(),
       fetch: mockFetch(),
       skipFalkor: true,
     });
     const names = orchestrator.getOpenAiTools().map((t) => t.function.name);
     expect(names).toContain('delegate');
+    expect(analyzer).toBeDefined();
+    expect(analyzer.name).toBe('analyzer');
+    expect(accounts).toEqual([]);
+    expect(downloadDir).toBeDefined();
   });
 
   it('cleanup вызывает disposeAll без ошибок', async () => {

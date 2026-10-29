@@ -1,37 +1,44 @@
 /**
- * REPL терминала (Фаза 5, change cli-transport).
+ * REPL терминала guided-режима (change guided-commands).
  *
- * Интерактивный цикл: readline → маршрутизация slash-команд или отправка
- * запроса оркестратору. Вывод прогресса tool-вызовов в реальном времени через
- * onToolEvent-хук оркестратора. /reset пересоздаёт агента через фабрику.
+ * Принимает только slash-команды: /find, /analyze, /download, /send, /stats,
+ * /quit. Свободный текст отклоняется. Каждая guided-команда маршрутизируется
+ * на свой обработчик (src/transport/cli/commands/).
  *
  * Не зависит от реальных потоков: работает через ConsoleIO-абстракцию,
  * что делает REPL тестируемым на MockConsoleIO.
  */
 import type { ConsoleIO } from './io.js';
-import {
-  formatAnswer,
-  formatToolProgress,
-  formatError,
-  formatHelp,
-  formatSessionReport,
-} from './format.js';
+import { formatCommandHelp, formatError, formatSessionReport } from './format.js';
 import { SessionStats } from '../../observability/session-stats.js';
-import type { ToolLogger, ToolLogEvent } from '../../observability/logger.js';
-import type { Orchestrator } from '../../agents/orchestrator.js';
-import type { ToolProgressEvent } from '../../llm/types.js';
+import {
+  runFindCommand,
+  runAnalyzeCommand,
+  runDownloadCommand,
+  runSendCommand,
+} from './commands/index.js';
+import type { MailAccount } from '../../tools/mail/types.js';
+import type { Subagent } from '../../agents/subagent.js';
 
 /** Признак того, что REPL завершился (для тестов/выхода). */
 export interface ReplExit {
   reason: 'quit' | 'eof';
 }
 
-/** Опции конструирования REPL. */
-export interface CliReplOptions {
+/** Зависимости guided-команд (пробрасываются обработчикам). */
+export interface GuidedCommandDeps {
   /** Ввод/вывод. */
   io: ConsoleIO;
-  /** Оркестратор (история сбрасывается через resetHistory). */
-  orchestrator: Orchestrator;
+  /** Настроенные аккаунты. */
+  accounts: MailAccount[];
+  /** Субагент-анализатор (для /analyze). */
+  analyzer: Subagent;
+  /** Папка загрузки (для /download). */
+  downloadDir?: string;
+}
+
+/** Опции конструирования REPL. */
+export interface CliReplOptions extends GuidedCommandDeps {
   /** Внешняя статистика сессии (опц.; по умолчанию создаётся внутри). */
   stats?: SessionStats;
 }
@@ -39,33 +46,28 @@ export interface CliReplOptions {
 const PROMPT = '> ';
 
 /**
- * REPL терминала: цикл ввода → ответ агента.
+ * REPL терминала guided-режима: цикл ввода → slash-команда.
  */
 export class CliRepl {
   private readonly io: ConsoleIO;
-  private readonly orchestrator: Orchestrator;
+  private readonly accounts: MailAccount[];
+  private readonly analyzer: Subagent;
+  private readonly downloadDir?: string;
   private readonly stats: SessionStats;
   private running = false;
 
   constructor(opts: CliReplOptions) {
     this.io = opts.io;
-    this.orchestrator = opts.orchestrator;
+    this.accounts = opts.accounts;
+    this.analyzer = opts.analyzer;
+    this.downloadDir = opts.downloadDir;
     this.stats = opts.stats ?? new SessionStats();
-  }
-
-  /** Создаёт логгер тулов, питающий статистику сессии (для composeAgents). */
-  createStatsLogger(): ToolLogger {
-    return {
-      logToolCall: (event: ToolLogEvent) => {
-        this.stats.recordToolLog(event.status);
-      },
-    };
   }
 
   /** Запускает REPL-цикл до /quit или EOF. */
   async start(): Promise<ReplExit> {
     this.running = true;
-    this.io.write(formatHelp(this.io.isTTY()) + '\n\n');
+    this.io.write(formatCommandHelp(this.io.isTTY()) + '\n\n');
 
     let exitReason: ReplExit['reason'] = 'quit';
 
@@ -87,22 +89,24 @@ export class CliRepl {
         continue;
       }
 
-      // Slash-команда.
-      if (trimmed.startsWith('/')) {
-        const exit = await this.handleCommand(trimmed);
-        if (exit) {
-          this.running = false;
-          exitReason = 'quit';
-          break;
-        }
+      // Не-slash текст — отклоняется.
+      if (!trimmed.startsWith('/')) {
+        this.io.write(
+          'Доступен только slash-командный режим. Введите /find, /analyze, /download, /send, /stats или /quit.\n',
+        );
         continue;
       }
 
-      // Запрос агенту.
-      await this.runQuery(trimmed);
+      // Slash-команда.
+      const shouldExit = await this.handleCommand(trimmed);
+      if (shouldExit) {
+        this.running = false;
+        exitReason = 'quit';
+        break;
+      }
     }
 
-    // Итоговый отчёт по сессии при выходе (если были прогоны).
+    // Итоговый отчёт по сессии при выходе (если были прогоны/вызовы).
     const report = this.stats.getReport();
     if (report.runs > 0 || report.toolCalls.ok > 0 || report.toolCalls.error > 0) {
       this.io.write('\n' + formatSessionReport(report, this.io.isTTY()) + '\n');
@@ -115,25 +119,36 @@ export class CliRepl {
   private async handleCommand(command: string): Promise<boolean> {
     const cmd = command.toLowerCase();
     switch (cmd) {
-      case '/help':
-        this.io.write(formatHelp(this.io.isTTY()) + '\n');
-        return false;
       case '/quit':
         this.io.write('До свидания.\n');
         return true;
-      case '/clear':
-        this.io.clear();
-        return false;
-      case '/reset':
-        this.resetAgent();
-        return false;
       case '/stats':
         this.io.write(formatSessionReport(this.stats.getReport(), this.io.isTTY()) + '\n');
+        return false;
+      case '/find':
+        await this.runSafe(() => runFindCommand({ io: this.io, accounts: this.accounts }));
+        return false;
+      case '/analyze':
+        await this.runSafe(() =>
+          runAnalyzeCommand({ io: this.io, accounts: this.accounts, analyzer: this.analyzer }),
+        );
+        return false;
+      case '/download':
+        await this.runSafe(() =>
+          runDownloadCommand({
+            io: this.io,
+            accounts: this.accounts,
+            downloadDir: this.downloadDir,
+          }),
+        );
+        return false;
+      case '/send':
+        await this.runSafe(() => runSendCommand({ io: this.io, accounts: this.accounts }));
         return false;
       default:
         this.io.write(
           formatError(
-            `Неизвестная команда: ${command}. Введите /help для справки.`,
+            `Неизвестная команда: ${command}. Доступные: /find, /analyze, /download, /send, /stats, /quit.`,
             this.io.isTTY(),
           ) + '\n',
         );
@@ -141,26 +156,13 @@ export class CliRepl {
     }
   }
 
-  /** Сброс истории диалога: обнуляет историю, тулы/субагенты остаются. */
-  private resetAgent(): void {
-    this.orchestrator.resetHistory();
-    this.io.write('История диалога сброшена.\n');
-  }
-
-  /** Прогон запроса через оркестратора с выводом прогресса. */
-  private async runQuery(text: string): Promise<void> {
-    const useColor = this.io.isTTY();
+  /** Запускает обработчик команды с перехватом непредвиденных ошибок. */
+  private async runSafe(fn: () => Promise<void>): Promise<void> {
     try {
-      const result = await this.orchestrator.run(text, {
-        onToolEvent: (event: ToolProgressEvent) => {
-          this.io.write(formatToolProgress(event, useColor) + '\n');
-        },
-      });
-      this.stats.recordRun(result);
-      this.io.write(formatAnswer(result, useColor) + '\n');
+      await fn();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.io.write(formatError(msg, useColor) + '\n');
+      this.io.write(formatError(`Непредвиденная ошибка: ${msg}`, this.io.isTTY()) + '\n');
     }
   }
 }

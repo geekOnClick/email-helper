@@ -3,8 +3,10 @@ import {
   formatAnswer,
   formatToolProgress,
   formatError,
-  formatHelp,
   formatSessionReport,
+  formatCommandHelp,
+  formatMessageList,
+  formatDraft,
 } from '../src/transport/cli/format.js';
 import type { OrchestratorResult } from '../src/agents/orchestrator.js';
 import type { ToolProgressEvent } from '../src/llm/types.js';
@@ -107,19 +109,46 @@ describe('formatError', () => {
   });
 });
 
-describe('formatHelp', () => {
-  it('содержит все slash-команды', () => {
-    const out = formatHelp(false);
-    expect(out).toContain('/help');
-    expect(out).toContain('/quit');
-    expect(out).toContain('/clear');
-    expect(out).toContain('/reset');
+describe('formatCommandHelp', () => {
+  it('содержит все slash-команды guided-режима', () => {
+    const out = formatCommandHelp(false);
+    expect(out).toContain('/find');
+    expect(out).toContain('/analyze');
+    expect(out).toContain('/download');
+    expect(out).toContain('/send');
     expect(out).toContain('/stats');
+    expect(out).toContain('/quit');
   });
 
-  it('упоминает отправку текста агенту', () => {
-    const out = formatHelp(false);
-    expect(out).toContain('агенту');
+  it('упоминает slash-командный режим', () => {
+    const out = formatCommandHelp(false);
+    expect(out).toContain('slash-командный режим');
+  });
+});
+
+describe('formatMessageList', () => {
+  it('выводит список писем с UID/темой/отправителем/датой', () => {
+    const messages = [
+      { uid: 1, subject: 'тест', from: { address: 'a@b.com' }, to: [], date: new Date('2026-10-01'), flags: [], folder: 'INBOX' },
+      { uid: 2, subject: 'второй', from: { address: 'c@d.com' }, to: [], date: new Date('2026-10-02'), flags: [], folder: 'INBOX' },
+    ];
+    const out = formatMessageList(messages, false);
+    expect(out).toContain('Найдено писем: 2');
+    expect(out).toContain('UID=1');
+    expect(out).toContain('тест');
+    expect(out).toContain('a@b.com');
+    expect(out).toContain('UID=2');
+  });
+});
+
+describe('formatDraft', () => {
+  it('выводит черновик с from/to/тема/текст', () => {
+    const out = formatDraft({ from: 'me@yandex.com', to: 'dest@example.com', subject: 'тема', text: 'тело' }, false);
+    expect(out).toContain('Черновик письма');
+    expect(out).toContain('me@yandex.com');
+    expect(out).toContain('dest@example.com');
+    expect(out).toContain('тема');
+    expect(out).toContain('тело');
   });
 });
 

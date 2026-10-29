@@ -9,10 +9,10 @@ import { CliRepl } from './transport/cli/repl.js';
 import { bootstrap } from './transport/cli/bootstrap.js';
 
 async function main(): Promise<void> {
-  const { orchestrator, stats, cleanup } = await bootstrap();
+  const { analyzer, accounts, downloadDir, stats, cleanup } = await bootstrap();
 
   const io = new NodeConsoleIO();
-  const repl = new CliRepl({ io, orchestrator, stats });
+  const repl = new CliRepl({ io, accounts, analyzer, downloadDir, stats });
 
   // SIGINT/SIGTERM вне исполнения → корректный выход с cleanup.
   let exiting = false;

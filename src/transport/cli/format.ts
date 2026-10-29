@@ -8,6 +8,7 @@
 import type { ToolProgressEvent } from '../../llm/types.js';
 import type { OrchestratorResult } from '../../agents/orchestrator.js';
 import type { SessionReport } from '../../observability/session-stats.js';
+import type { EmailMessage } from '../../types/email.js';
 
 /** ANSI-коды. */
 const ANSI = {
@@ -99,19 +100,58 @@ export function formatSessionReport(report: SessionReport, useColor = true): str
 }
 
 /**
- * Текст справки по slash-командам.
+ * Текст справки по slash-командам guided-режима.
  */
-export function formatHelp(useColor = true): string {
+export function formatCommandHelp(useColor = true): string {
   const cmd = (name: string, desc: string): string =>
     `  ${color(name, ANSI.cyan, useColor)}  ${desc}`;
   return [
     'Команды:',
-    cmd('/help', 'показать эту справку'),
+    cmd('/find', 'поиск писем по теме/дате/отправителю'),
+    cmd('/analyze', 'найти и проанализировать письмо'),
+    cmd('/download', 'найти и скачать вложения письма'),
+    cmd('/send', 'отправить письмо с подтверждением'),
+    cmd('/stats', 'статистика сессии (прогоны, тулы, токены)'),
     cmd('/quit', 'завершить сессию'),
-    cmd('/clear', 'очистить экран'),
-    cmd('/reset', 'сбросить историю диалога агента'),
-    cmd('/stats', 'показать статистику сессии (прогоны, тулы, токены)'),
     '',
-    'Любой другой текст отправляется агенту как запрос.',
+    'Доступен только slash-командный режим.',
   ].join('\n');
+}
+
+/**
+ * Форматирует список найденных писем (для /find и выбора в /analyze, /download).
+ */
+export function formatMessageList(messages: EmailMessage[], useColor = true): string {
+  const sep = color('─'.repeat(40), ANSI.dim, useColor);
+  const lines: string[] = [`Найдено писем: ${messages.length}`, sep];
+  messages.forEach((m, i) => {
+    const from = m.from?.address ?? 'неизвестно';
+    const date = m.date.toISOString().slice(0, 10);
+    lines.push(`${i + 1}. UID=${m.uid} | ${m.subject} | ${from} | ${date}`);
+  });
+  return lines.join('\n');
+}
+
+/** Черновик письма для подтверждения перед отправкой. */
+export interface DraftEmail {
+  to: string;
+  subject: string;
+  text: string;
+  from: string;
+}
+
+/**
+ * Форматирует черновик письма для предпросмотра перед отправкой.
+ */
+export function formatDraft(draft: DraftEmail, useColor = true): string {
+  const label = color('Черновик письма', ANSI.cyan, useColor);
+  const sep = color('─'.repeat(40), ANSI.dim, useColor);
+  const lines: string[] = [sep, label, sep];
+  lines.push(`От: ${draft.from}`);
+  lines.push(`Кому: ${draft.to}`);
+  lines.push(`Тема: ${draft.subject}`);
+  lines.push('');
+  lines.push(draft.text);
+  lines.push(sep);
+  return lines.join('\n');
 }

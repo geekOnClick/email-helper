@@ -9,23 +9,13 @@ import { noopToolLogger } from '../../src/observability/logger.js';
 import type { MailProvider } from '../../src/tools/mail/mail-provider.js';
 import type { MailAccount } from '../../src/tools/mail/types.js';
 import type { RouterAiClient } from '../../src/llm/routerai-client.js';
-import type { ChatResult, ToolCall } from '../../src/llm/types.js';
+import type { ChatResult } from '../../src/llm/types.js';
 import type { Config } from '../../src/config/schema.js';
-import type { EmailMessage, SearchResult } from '../../src/types/email.js';
+import type { SearchResult } from '../../src/types/email.js';
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   const base = loadConfig({ ROUTERAI_API_KEY: 'test-key' });
-  return {
-    ...base,
-    AGENT_MAX_ITERATIONS: 8,
-    AGENT_MAX_TOOL_RESULT_CHARS: 1000,
-    ...overrides,
-  };
-}
-
-function tc(id: string, name: string, argsObj: unknown): ToolCall {
-  const raw = JSON.stringify(argsObj);
-  return { id, name, arguments: raw, args: JSON.parse(raw) };
+  return { ...base, AGENT_MAX_ITERATIONS: 5, AGENT_MAX_TOOL_RESULT_CHARS: 1000, ...overrides };
 }
 
 const ACCOUNT: MailAccount = {
@@ -35,9 +25,9 @@ const ACCOUNT: MailAccount = {
   authStrategy: 'basic',
 };
 
-/** Стаб-провайдер IMAP: возвращает предзаготовленные письма. */
+/** Стаб-провайдер IMAP. */
 function stubProvider(): MailProvider {
-  const messages: EmailMessage[] = [
+  const messages = [
     {
       uid: 201,
       subject: 'Счёт за услуги',
@@ -58,7 +48,7 @@ function stubProvider(): MailProvider {
   };
 }
 
-/** Стаб SMTP-фабрика: фиксирует отправку без реального SMTP. */
+/** Стаб SMTP-фабрики: фиксирует отправку. */
 function stubSmtpFactory() {
   const sent: { to: string[]; subject: string }[] = [];
   return {
@@ -74,75 +64,72 @@ function stubSmtpFactory() {
   };
 }
 
-/**
- * Scripted-клиент для сценария «поиск→отправка»:
- *   1) оркестратор → mail.search (найти письма со счётом)
- *   2) оркестратор → mail.send (отправить ответ)
- *   3) оркестратор → финал «Письмо найдено, ответ отправлен»
- *
- * mail.connect пропущен: стаб-провайдер предзаготовлен в sessionStore.
- */
-function scriptedClient(): RouterAiClient {
-  let callNo = 0;
+function stubClient(): RouterAiClient {
   return {
-    chat: async (): Promise<ChatResult> => {
-      callNo++;
-      if (callNo === 1) {
-        return {
-          content: '',
-          toolCalls: [tc('s1', 'mail.search', { login: 'test@yandex.com', subject: 'Счёт' })],
-        };
-      }
-      if (callNo === 2) {
-        return {
-          content: '',
-          toolCalls: [
-            tc('send1', 'mail.send', {
-              login: 'test@yandex.com',
-              to: [{ address: 'billing@example.com' }],
-              subject: 'Re: Счёт за услуги',
-              text: 'Получено, оплачиваю в течение 3 дней.',
-            }),
-          ],
-        };
-      }
-      return {
-        content: 'Письмо со счётом найдено, ответ отправлен на billing@example.com.',
-        toolCalls: [],
-      };
-    },
+    chat: async (): Promise<ChatResult> => ({ content: 'ок', toolCalls: [] }),
   } as unknown as RouterAiClient;
 }
 
-describe('E2E CLI: подключение→поиск→отправка', () => {
+describe('E2E CLI guided: /send', () => {
   beforeEach(() => resetTools());
 
-  it('полный цикл с стаб-провайдером IMAP и стаб SMTP', async () => {
+  it('/send с подтверждением «да» → отправка', async () => {
     const smtpStub = stubSmtpFactory();
-    const orchestrator = await composeAgents({
-      client: scriptedClient(),
+    await composeAgents({
+      client: stubClient(),
       config: makeConfig(),
       accounts: [ACCOUNT],
       smtpTransportFactory: smtpStub.factory,
       toolLogger: noopToolLogger(),
     });
-
-    // Предзаготовленная стаб-сессия в store (без реального mail.connect).
     getSharedSessionStore().set(ACCOUNT, stubProvider());
 
-    const io = new MockConsoleIO(['найди счёт и ответь на него', '/quit']);
-    const repl = new CliRepl({ io, orchestrator });
+    const io = new MockConsoleIO([
+      '/send',
+      'тема - Re: Счёт за услуги',
+      'текст - Оплачиваю в течение 3 дней.',
+      'получатель - billing@example.com',
+      '',
+      'да',
+      '/quit',
+    ]);
+    const analyzer = { name: 'analyzer', description: 'stub', run: async () => '' };
+    const repl = new CliRepl({ io, accounts: [ACCOUNT], analyzer, downloadDir: '/tmp' });
     const exit = await repl.start();
     const out = io.output();
 
     expect(exit.reason).toBe('quit');
-    // Прогресс tool-вызовов отображён.
-    expect(out).toContain('→ mail.search');
-    expect(out).toContain('→ mail.send');
-    // Финальный ответ.
-    expect(out).toContain('ответ отправлен');
-    // Отчёт сессии при выходе.
-    expect(out).toContain('Статистика сессии');
-    expect(out).toContain('Прогонов: 1');
+    expect(out).toContain('Черновик письма');
+    expect(out).toContain('billing@example.com');
+    expect(out).toContain('Письмо отправлено');
+  });
+
+  it('/send с отказом → без отправки', async () => {
+    const smtpStub = stubSmtpFactory();
+    await composeAgents({
+      client: stubClient(),
+      config: makeConfig(),
+      accounts: [ACCOUNT],
+      smtpTransportFactory: smtpStub.factory,
+      toolLogger: noopToolLogger(),
+    });
+    getSharedSessionStore().set(ACCOUNT, stubProvider());
+
+    const io = new MockConsoleIO([
+      '/send',
+      'тема - Тест',
+      'текст - тело',
+      'получатель - dest@example.com',
+      '',
+      'нет',
+      '/quit',
+    ]);
+    const analyzer = { name: 'analyzer', description: 'stub', run: async () => '' };
+    const repl = new CliRepl({ io, accounts: [ACCOUNT], analyzer, downloadDir: '/tmp' });
+    const exit = await repl.start();
+    const out = io.output();
+
+    expect(exit.reason).toBe('quit');
+    expect(out).toContain('Отправка отменена');
   });
 });

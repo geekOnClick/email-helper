@@ -13,10 +13,12 @@ import { RouterAiClient } from '../../llm/routerai-client.js';
 import { EmbeddingsClient } from '../../llm/embeddings.js';
 import { FalkorClient } from '../../tools/vector/falkor.js';
 import { composeAgents } from '../../agents/compose.js';
+import { createAnalyzer } from '../../agents/analyzer.js';
 import { getSharedSessionStore } from '../../tools/mail/register-tools.js';
 import { SessionStats } from '../../observability/session-stats.js';
 import { consoleToolLogger, type ToolLogger } from '../../observability/logger.js';
 import type { Orchestrator } from '../../agents/orchestrator.js';
+import type { Subagent } from '../../agents/subagent.js';
 import type { Config } from '../../config/schema.js';
 import type { MailAccount } from '../../tools/mail/types.js';
 import type { CreateMailProviderOptions } from '../../tools/mail/providers/factory.js';
@@ -36,6 +38,12 @@ export interface BootstrapOptions {
 /** Результат bootstrap: готовый агент, статистика и cleanup. */
 export interface BootstrapResult {
   orchestrator: Orchestrator;
+  /** Субагент-анализатор (для команды /analyze). */
+  analyzer: Subagent;
+  /** Настроенные аккаунты (для выбора в guided-командах). */
+  accounts: MailAccount[];
+  /** Папка загрузки по умолчанию (для /download). */
+  downloadDir: string;
   /** Статистика сессии для REPL (питается toolLogger агента). */
   stats: SessionStats;
   /** Освобождает занятые ресурсы (mail-сессии, FalkorDB). */
@@ -122,11 +130,14 @@ async function buildAgent(
     toolLogger,
   });
 
+  // Анализатор для команды /analyze (прямой вызов, вне цикла delegate оркестратора).
+  const analyzer = await createAnalyzer({ client, config, toolLogger });
+
   /** Cleanup: закрывает mail-сессии и FalkorDB. */
   const cleanup = async (): Promise<void> => {
     await getSharedSessionStore().disposeAll();
     if (falkorClient) await falkorClient.close();
   };
 
-  return { orchestrator, stats, cleanup };
+  return { orchestrator, analyzer, accounts, downloadDir: config.DOWNLOAD_DIR, stats, cleanup };
 }

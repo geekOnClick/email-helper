@@ -9,23 +9,13 @@ import { noopToolLogger } from '../../src/observability/logger.js';
 import type { MailProvider } from '../../src/tools/mail/mail-provider.js';
 import type { MailAccount } from '../../src/tools/mail/types.js';
 import type { RouterAiClient } from '../../src/llm/routerai-client.js';
-import type { ChatResult, ToolCall } from '../../src/llm/types.js';
+import type { ChatResult } from '../../src/llm/types.js';
 import type { Config } from '../../src/config/schema.js';
 import type { EmailMessage, EmailFull, SearchResult, DownloadResult } from '../../src/types/email.js';
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   const base = loadConfig({ ROUTERAI_API_KEY: 'test-key' });
-  return {
-    ...base,
-    AGENT_MAX_ITERATIONS: 8,
-    AGENT_MAX_TOOL_RESULT_CHARS: 1000,
-    ...overrides,
-  };
-}
-
-function tc(id: string, name: string, argsObj: unknown): ToolCall {
-  const raw = JSON.stringify(argsObj);
-  return { id, name, arguments: raw, args: JSON.parse(raw) };
+  return { ...base, AGENT_MAX_ITERATIONS: 5, AGENT_MAX_TOOL_RESULT_CHARS: 1000, ...overrides };
 }
 
 const ACCOUNT: MailAccount = {
@@ -35,7 +25,7 @@ const ACCOUNT: MailAccount = {
   authStrategy: 'basic',
 };
 
-/** Стаб-провайдер: возвращает предзаготовленные письма без реального IMAP. */
+/** Стаб-провайдер IMAP: возвращает предзаготовленные письма. */
 function stubProvider(): MailProvider {
   const messages: EmailMessage[] = [
     {
@@ -59,14 +49,12 @@ function stubProvider(): MailProvider {
       size: 1536,
     },
   ];
-
   const full: EmailFull = {
-    ...messages[0],
+    ...(messages[0] ?? { uid: 0, subject: '', from: { address: '' }, to: [], date: new Date(), flags: [], folder: 'INBOX' }),
     body: 'Тело письма: план работ по проекту X на квартал.',
     hasBody: true,
     attachments: [{ part: '1', filename: 'plan.pdf', contentType: 'application/pdf', size: 500 }],
   };
-
   return {
     connect: async () => ({ ok: true, login: ACCOUNT.login }),
     listFolders: async () => [{ name: 'INBOX', path: 'INBOX', delimiter: '/', flags: [] }],
@@ -81,79 +69,68 @@ function stubProvider(): MailProvider {
   };
 }
 
-/**
- * Scripted-клиент для сценария «поиск→анализ→скачивание→ответ»:
- *   1) оркестратор → mail.search (найти письма по проекту)
- *   2) оркестратор → mail.fetch (прочитать письмо 101)
- *   3) оркестратор → mail.downloadAttachments (скачать вложения)
- *   4) оркестратор → финал «Найдено 2 письма, вложение скачано»
- */
-function scriptedClient(): RouterAiClient {
-  let callNo = 0;
+/** Stub LLM (не используется в /find, но нужен composeAgents). */
+function stubClient(): RouterAiClient {
   return {
-    chat: async (): Promise<ChatResult> => {
-      callNo++;
-      if (callNo === 1) {
-        return {
-          content: '',
-          toolCalls: [tc('s1', 'mail.search', { login: 'test@yandex.com', subject: 'Проект X' })],
-        };
-      }
-      if (callNo === 2) {
-        return {
-          content: '',
-          toolCalls: [tc('f1', 'mail.fetch', { login: 'test@yandex.com', uid: 101 })],
-        };
-      }
-      if (callNo === 3) {
-        return {
-          content: '',
-          toolCalls: [
-            tc('d1', 'mail.downloadAttachments', {
-              login: 'test@yandex.com',
-              uid: 101,
-              targetDir: '/tmp/downloads',
-            }),
-          ],
-        };
-      }
-      return {
-        content: 'Найдено 2 письма по проекту X, вложение plan.pdf скачано в /tmp/downloads.',
-        toolCalls: [],
-      };
-    },
+    chat: async (): Promise<ChatResult> => ({ content: 'ок', toolCalls: [] }),
   } as unknown as RouterAiClient;
 }
 
-describe('E2E CLI: поиск→анализ→скачивание→ответ', () => {
+describe('E2E CLI guided: /find', () => {
   beforeEach(() => resetTools());
 
-  it('полный цикл через CliRepl с стаб-провайдером почты', async () => {
+  it('/find находит письма по теме → вывод списка', async () => {
     const orchestrator = await composeAgents({
-      client: scriptedClient(),
+      client: stubClient(),
       config: makeConfig(),
       accounts: [ACCOUNT],
       toolLogger: noopToolLogger(),
     });
-
-    // Предзаготовленная стаб-сессия в store (без реального mail.connect).
+    void orchestrator; // не используется в guided-режиме, но composeAgents регистрирует тулы
     getSharedSessionStore().set(ACCOUNT, stubProvider());
 
-    const io = new MockConsoleIO(['найди письма по проекту X и скачай вложения', '/quit']);
-    const repl = new CliRepl({ io, orchestrator });
+    const io = new MockConsoleIO(['найди письма по проекту X', '/find', 'тема - Проект X', '', '/quit']);
+    // Первая строка — свободный текст (отклоняется), затем /find.
+    const analyzer = { name: 'analyzer', description: 'stub', run: async () => '' };
+    const repl = new CliRepl({ io, accounts: [ACCOUNT], analyzer, downloadDir: '/tmp' });
     const exit = await repl.start();
     const out = io.output();
 
     expect(exit.reason).toBe('quit');
-    // Прогресс tool-вызовов отображён.
-    expect(out).toContain('→ mail.search');
-    expect(out).toContain('→ mail.fetch');
-    expect(out).toContain('→ mail.downloadAttachments');
-    // Финальный ответ.
-    expect(out).toContain('Найдено 2 письма');
-    expect(out).toContain('plan.pdf');
-    // Отчёт сессии при выходе.
-    expect(out).toContain('Статистика сессии');
-    expect(out).toContain('Прогонов: 1');
+    expect(out).toContain('только slash-командный режим'); // первая реплика отклонена
+    expect(out).toContain('Найдено писем: 2');
+    expect(out).toContain('Проект X: план работ');
+    expect(out).toContain('UID=101');
+  });
+});
+
+describe('E2E CLI guided: /download', () => {
+  beforeEach(() => resetTools());
+
+  it('/download скачивает вложение выбранного письма', async () => {
+    await composeAgents({
+      client: stubClient(),
+      config: makeConfig(),
+      accounts: [ACCOUNT],
+      toolLogger: noopToolLogger(),
+    });
+    getSharedSessionStore().set(ACCOUNT, stubProvider());
+
+    const tmpDir = '/tmp/eh-e2e-dl';
+    const io = new MockConsoleIO([
+      '/download',
+      'тема - Проект X',
+      '',
+      '101', // выбор UID (2 письма найдено)
+      '/quit',
+    ]);
+    const analyzer = { name: 'analyzer', description: 'stub', run: async () => '' };
+    const repl = new CliRepl({ io, accounts: [ACCOUNT], analyzer, downloadDir: tmpDir });
+    const exit = await repl.start();
+    const out = io.output();
+
+    expect(exit.reason).toBe('quit');
+    expect(out).toContain('Скачано файлов: 1');
+    expect(out).toContain('plan-101.pdf');
   });
 });
