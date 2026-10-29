@@ -14,6 +14,7 @@ import type { ToolDef } from '../tools/registry.js';
 import { mapToolsToOpenAi } from '../llm/tool-mapping.js';
 import { runToolLoop } from './loop.js';
 import { loadSkill } from './skill-loader.js';
+import { noopToolLogger, type ToolLogger } from '../observability/logger.js';
 import type { Subagent } from './subagent.js';
 import type { RouterAiClient } from '../llm/routerai-client.js';
 import type { Config } from '../config/schema.js';
@@ -34,6 +35,8 @@ export interface AnalyzerOptions {
   maxToolResultChars?: number;
   /** Явный системный промпт (иначе грузится skills/analyzer.md). */
   skill?: string;
+  /** Логгер вызовов тулов (опц., аудит). По умолчанию no-op. */
+  toolLogger?: ToolLogger;
 }
 
 /**
@@ -50,6 +53,7 @@ class Analyzer implements Subagent {
   private readonly maxIterations: number;
   private readonly maxToolResultChars: number;
   private readonly openAiTools: ReturnType<typeof mapToolsToOpenAi>;
+  private readonly toolLogger: ToolLogger;
 
   private constructor(opts: AnalyzerOptions, skill: string) {
     this.client = opts.client;
@@ -57,6 +61,7 @@ class Analyzer implements Subagent {
     this.maxIterations = opts.maxIterations ?? opts.config.AGENT_MAX_ITERATIONS;
     this.maxToolResultChars =
       opts.maxToolResultChars ?? opts.config.AGENT_MAX_TOOL_RESULT_CHARS;
+    this.toolLogger = opts.toolLogger ?? noopToolLogger();
 
     // Ограниченный набор тулов: только чтение содержимого писем. delegate НЕ входит.
     const domainTools: ToolDef[] = listTools().filter((t) =>
@@ -85,6 +90,7 @@ class Analyzer implements Subagent {
       maxIterations: this.maxIterations,
       maxToolResultChars: this.maxToolResultChars,
       role: 'analyzer',
+      toolLogger: this.toolLogger,
       // extraTools НЕ передаём — delegate недоступен (глубина делегирования = 1).
     });
 

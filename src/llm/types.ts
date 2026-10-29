@@ -134,6 +134,28 @@ export interface Usage {
   totalTokens?: number;
 }
 
+/**
+ * Складывает использование токенов двух итераций в агрегат (Фаза 8, observability).
+ *
+ * `next` без usage или без поля → аккумулятор без изменений (провайдер не вернул данные).
+ * Оба `undefined` → `undefined` (прогон без данных о токенах).
+ */
+export function addUsage(acc: Usage | undefined, next: Usage | undefined): Usage | undefined {
+  if (!acc && !next) return undefined;
+  const a = acc ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const n = next ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const sum = (x?: number, y?: number): number | undefined =>
+    x === undefined && y === undefined ? undefined : (x ?? 0) + (y ?? 0);
+  const promptTokens = sum(a.promptTokens, n.promptTokens);
+  const completionTokens = sum(a.completionTokens, n.completionTokens);
+  const totalTokens = sum(a.totalTokens, n.totalTokens);
+  // Если все три поля undefined — возвращаем undefined (нет данных ни от одной итерации).
+  if (promptTokens === undefined && completionTokens === undefined && totalTokens === undefined) {
+    return undefined;
+  }
+  return { promptTokens, completionTokens, totalTokens };
+}
+
 /** Результат чат-запроса. */
 export interface ChatResult {
   /** Текстовый ответ ассистента (может быть пустым при tool_calls). */

@@ -7,6 +7,7 @@
  */
 import type { ToolProgressEvent } from '../../llm/types.js';
 import type { OrchestratorResult } from '../../agents/orchestrator.js';
+import type { SessionReport } from '../../observability/session-stats.js';
 
 /** ANSI-коды. */
 const ANSI = {
@@ -77,6 +78,27 @@ export function formatError(message: string, useColor = true): string {
 }
 
 /**
+ * Форматирует сводный отчёт по сессии: прогоны, вызовы тулов, токены.
+ */
+export function formatSessionReport(report: SessionReport, useColor = true): string {
+  const label = color('Статистика сессии', ANSI.cyan, useColor);
+  const sep = color('─'.repeat(40), ANSI.dim, useColor);
+  const lines: string[] = [sep, label, sep];
+  lines.push(`Прогонов: ${report.runs}`);
+  const okStr = color(`${report.toolCalls.ok} ок`, ANSI.green, useColor);
+  const errStr = color(`${report.toolCalls.error} ошибок`, ANSI.red, useColor);
+  lines.push(`Вызовы тулов: ${okStr}, ${errStr}`);
+  if (report.tokens.available) {
+    lines.push(
+      `Токены LLM: промпт ${report.tokens.prompt}, генерация ${report.tokens.completion}, всего ${report.tokens.total}`,
+    );
+  } else {
+    lines.push('Токены LLM: данные недоступны (провайдер не вернул)');
+  }
+  return lines.join('\n');
+}
+
+/**
  * Текст справки по slash-командам.
  */
 export function formatHelp(useColor = true): string {
@@ -88,6 +110,7 @@ export function formatHelp(useColor = true): string {
     cmd('/quit', 'завершить сессию'),
     cmd('/clear', 'очистить экран'),
     cmd('/reset', 'сбросить историю диалога агента'),
+    cmd('/stats', 'показать статистику сессии (прогоны, тулы, токены)'),
     '',
     'Любой другой текст отправляется агенту как запрос.',
   ].join('\n');

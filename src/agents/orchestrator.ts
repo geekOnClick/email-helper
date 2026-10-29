@@ -10,6 +10,7 @@ import type { ToolDef } from '../tools/registry.js';
 import { mapToolsToOpenAi } from '../llm/tool-mapping.js';
 import { runToolLoop } from './loop.js';
 import { loadSkill } from './skill-loader.js';
+import { noopToolLogger, type ToolLogger } from '../observability/logger.js';
 import {
   SubagentRegistry,
   createDelegateTool,
@@ -38,6 +39,8 @@ export interface OrchestratorOptions {
   maxToolResultChars?: number;
   /** Явный системный промпт (иначе грузится skills/orchestrator.md). */
   skill?: string;
+  /** Логгер вызовов тулов (опц., аудит). По умолчанию no-op. */
+  toolLogger?: ToolLogger;
 }
 
 /** Результат прогона реплики пользователя через оркестратор. */
@@ -66,12 +69,14 @@ export class Orchestrator {
   private readonly openAiTools: ReturnType<typeof mapToolsToOpenAi>;
   private readonly subagentRegistry: SubagentRegistry;
   private readonly delegateTool: ToolDef | null;
+  private readonly toolLogger: ToolLogger;
 
   private constructor(opts: OrchestratorOptions, systemPrompt: string) {
     this.client = opts.client;
     this.maxIterations = opts.maxIterations ?? opts.config.AGENT_MAX_ITERATIONS;
     this.maxToolResultChars =
       opts.maxToolResultChars ?? opts.config.AGENT_MAX_TOOL_RESULT_CHARS;
+    this.toolLogger = opts.toolLogger ?? noopToolLogger();
 
     // Субагенты → реестр; тул delegate добавляется только при наличии.
     this.subagentRegistry = new SubagentRegistry();
@@ -113,6 +118,7 @@ export class Orchestrator {
       role: 'orchestrator',
       extraTools: this.delegateTool ? [this.delegateTool] : [],
       onToolEvent: opts?.onToolEvent,
+      toolLogger: this.toolLogger,
     });
 
     // Дополняем историю финальным assistant-ответом (без tool_calls).

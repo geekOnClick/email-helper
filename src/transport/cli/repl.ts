@@ -14,7 +14,10 @@ import {
   formatToolProgress,
   formatError,
   formatHelp,
+  formatSessionReport,
 } from './format.js';
+import { SessionStats } from '../../observability/session-stats.js';
+import type { ToolLogger, ToolLogEvent } from '../../observability/logger.js';
 import type { Orchestrator } from '../../agents/orchestrator.js';
 import type { ToolProgressEvent } from '../../llm/types.js';
 
@@ -29,6 +32,8 @@ export interface CliReplOptions {
   io: ConsoleIO;
   /** Оркестратор (история сбрасывается через resetHistory). */
   orchestrator: Orchestrator;
+  /** Внешняя статистика сессии (опц.; по умолчанию создаётся внутри). */
+  stats?: SessionStats;
 }
 
 const PROMPT = '> ';
@@ -39,17 +44,30 @@ const PROMPT = '> ';
 export class CliRepl {
   private readonly io: ConsoleIO;
   private readonly orchestrator: Orchestrator;
+  private readonly stats: SessionStats;
   private running = false;
 
   constructor(opts: CliReplOptions) {
     this.io = opts.io;
     this.orchestrator = opts.orchestrator;
+    this.stats = opts.stats ?? new SessionStats();
+  }
+
+  /** Создаёт логгер тулов, питающий статистику сессии (для composeAgents). */
+  createStatsLogger(): ToolLogger {
+    return {
+      logToolCall: (event: ToolLogEvent) => {
+        this.stats.recordToolLog(event.status);
+      },
+    };
   }
 
   /** Запускает REPL-цикл до /quit или EOF. */
   async start(): Promise<ReplExit> {
     this.running = true;
     this.io.write(formatHelp(this.io.isTTY()) + '\n\n');
+
+    let exitReason: ReplExit['reason'] = 'quit';
 
     while (this.running) {
       this.io.write(PROMPT);
@@ -58,7 +76,8 @@ export class CliRepl {
       // EOF.
       if (line === null) {
         this.running = false;
-        return { reason: 'eof' };
+        exitReason = 'eof';
+        break;
       }
 
       const trimmed = line.trim();
@@ -73,7 +92,8 @@ export class CliRepl {
         const exit = await this.handleCommand(trimmed);
         if (exit) {
           this.running = false;
-          return { reason: 'quit' };
+          exitReason = 'quit';
+          break;
         }
         continue;
       }
@@ -82,7 +102,13 @@ export class CliRepl {
       await this.runQuery(trimmed);
     }
 
-    return { reason: 'quit' };
+    // Итоговый отчёт по сессии при выходе (если были прогоны).
+    const report = this.stats.getReport();
+    if (report.runs > 0 || report.toolCalls.ok > 0 || report.toolCalls.error > 0) {
+      this.io.write('\n' + formatSessionReport(report, this.io.isTTY()) + '\n');
+    }
+
+    return { reason: exitReason };
   }
 
   /** Маршрутизация slash-команд. true → завершить REPL. */
@@ -100,6 +126,9 @@ export class CliRepl {
         return false;
       case '/reset':
         this.resetAgent();
+        return false;
+      case '/stats':
+        this.io.write(formatSessionReport(this.stats.getReport(), this.io.isTTY()) + '\n');
         return false;
       default:
         this.io.write(
@@ -127,6 +156,7 @@ export class CliRepl {
           this.io.write(formatToolProgress(event, useColor) + '\n');
         },
       });
+      this.stats.recordRun(result);
       this.io.write(formatAnswer(result, useColor) + '\n');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

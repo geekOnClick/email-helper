@@ -129,4 +129,61 @@ describe('CliRepl: slash-команды и ввод', () => {
       expect(exit.reason).toBe('eof');
     });
   });
+
+  describe('/stats', () => {
+    it('выводит статистику сессии по команде', async () => {
+      const { io } = await runRepl(
+        ['найди письма', '/stats', '/quit'],
+        makeResult({
+          content: 'готово',
+          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        }),
+      );
+      const out = io.output();
+      expect(out).toContain('Статистика сессии');
+      expect(out).toContain('Прогонов: 1');
+      expect(out).toContain('промпт 100');
+    });
+
+    it('/stats без прогонов — нулевая статистика', async () => {
+      const { io } = await runRepl(['/stats', '/quit']);
+      const out = io.output();
+      expect(out).toContain('Прогонов: 0');
+    });
+  });
+
+  describe('отчёт при выходе', () => {
+    it('выводит итоговый отчёт при /quit (если были прогоны)', async () => {
+      const { io } = await runRepl(
+        ['найди письма', '/quit'],
+        makeResult({
+          content: 'готово',
+          usage: { promptTokens: 200, completionTokens: 80, totalTokens: 280 },
+        }),
+      );
+      const out = io.output();
+      expect(out).toContain('Статистика сессии');
+      expect(out).toContain('Прогонов: 1');
+      expect(out).toContain('всего 280');
+    });
+
+    it('выводит итоговый отчёт при EOF (если были прогоны)', async () => {
+      const { io } = await runRepl(
+        ['найди письма'],
+        makeResult({
+          content: 'готово',
+          usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+        }),
+      );
+      const out = io.output();
+      expect(out).toContain('Статистика сессии');
+      expect(out).toContain('Прогонов: 1');
+    });
+
+    it('без прогонов отчёт не выводится', async () => {
+      const { io } = await runRepl(['/quit']);
+      const out = io.output();
+      expect(out).not.toContain('Статистика сессии');
+    });
+  });
 });

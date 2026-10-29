@@ -19,12 +19,12 @@
 | Почтовые протоколы | IMAP/SMTP (imapflow, nodemailer) |
 | Тестирование | Vitest |
 | SDD | OpenSpec |
-| Транспорты | CLI (Фаза 5), MCP (Фаза 6), Telegram (Фаза 7) |
+| Транспорты | CLI (Фаза 5), MCP (Фаза 6) |
 
 ## Архитектура
 
 ```
-Транспорт (CLI / Telegram)
+Транспорт (CLI / MCP)
         │
         ▼
   Оркестратор (glm-5.2)  ── разбор интента, планирование, делегирование
@@ -46,19 +46,20 @@
 - **Анализатор** — глубокий анализ содержимого писем, саммари, извлечение сущностей, классификация тематики. Дорогая модель.
 - **Помощник** — рутинные операции: подключение, поиск, скачивание вложений, отправка, работа с папками, индексация. Дешёвая модель.
 
-### Ключевые тулы (план)
+### Ключевые тулы
 
-`mail.connect`, `mail.listFolders`, `mail.search`, `mail.fetch`, `mail.downloadAttachments`, `mail.send`, `mail.analyze`, `embeddings.index`, `vector.search`.
+`mail.connect`, `mail.listFolders`, `mail.search`, `mail.fetch`, `mail.downloadAttachments`, `mail.send`, `embeddings.index`, `vector.search`.
 
 ## Составные части
 
 - `src/config/` — zod-схема и loader конфигурации.
-- `src/llm/` — клиент RouterAI (Фаза 2).
-- `src/agents/` — оркестратор + субагенты (Фаза 2).
-- `src/tools/mail/` — тулы почты и провайдеры (Фаза 1).
-- `src/tools/vector/` — FalkorDB + embeddings (Фаза 3).
-- `src/transport/` — CLI, Telegram (Фазы 5, 7).
-- `src/mcp/` — MCP-сервер (Фаза 6).
+- `src/llm/` — клиент RouterAI, модели, эмбеддинги.
+- `src/agents/` — оркестратор + субагенты, цикл tool-calling.
+- `src/tools/mail/` — тулы почты и провайдеры (Yandex, Outlook).
+- `src/tools/vector/` — FalkorDB + embeddings + vector search.
+- `src/transport/cli/` — терминальный REPL (Фаза 5).
+- `src/mcp/` — MCP-сервер, stdio + Streamable HTTP (Фаза 6).
+- `src/observability/` — логгер тулов, статистика сессии (Фаза 8).
 
 ## Разработка
 

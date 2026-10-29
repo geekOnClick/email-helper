@@ -14,6 +14,8 @@ import { EmbeddingsClient } from '../../llm/embeddings.js';
 import { FalkorClient } from '../../tools/vector/falkor.js';
 import { composeAgents } from '../../agents/compose.js';
 import { getSharedSessionStore } from '../../tools/mail/register-tools.js';
+import { SessionStats } from '../../observability/session-stats.js';
+import { consoleToolLogger, type ToolLogger } from '../../observability/logger.js';
 import type { Orchestrator } from '../../agents/orchestrator.js';
 import type { Config } from '../../config/schema.js';
 import type { MailAccount } from '../../tools/mail/types.js';
@@ -31,9 +33,11 @@ export interface BootstrapOptions {
   skipFalkor?: boolean;
 }
 
-/** Результат bootstrap: готовый агент и cleanup. */
+/** Результат bootstrap: готовый агент, статистика и cleanup. */
 export interface BootstrapResult {
   orchestrator: Orchestrator;
+  /** Статистика сессии для REPL (питается toolLogger агента). */
+  stats: SessionStats;
   /** Освобождает занятые ресурсы (mail-сессии, FalkorDB). */
   cleanup: () => Promise<void>;
 }
@@ -91,6 +95,21 @@ async function buildAgent(
     }
   }
 
+  // Статистика сессии + логгер, питающий её (маскирует пароли аккаунтов).
+  const stats = new SessionStats();
+  const accountSecrets = accounts.map((a) => a.password);
+  // Составной логгер: консольный (аудит в stderr) + питающий статистику.
+  const statsLogger: ToolLogger = {
+    logToolCall: (event) => stats.recordToolLog(event.status),
+  };
+  const consoleLogger = consoleToolLogger({ secrets: accountSecrets });
+  const toolLogger: ToolLogger = {
+    logToolCall: (event) => {
+      consoleLogger.logToolCall(event);
+      statsLogger.logToolCall(event);
+    },
+  };
+
   const orchestrator = await composeAgents({
     client,
     config,
@@ -100,6 +119,7 @@ async function buildAgent(
     downloadDir: config.DOWNLOAD_DIR,
     embeddingsClient,
     falkorClient,
+    toolLogger,
   });
 
   /** Cleanup: закрывает mail-сессии и FalkorDB. */
@@ -108,5 +128,5 @@ async function buildAgent(
     if (falkorClient) await falkorClient.close();
   };
 
-  return { orchestrator, cleanup };
+  return { orchestrator, stats, cleanup };
 }

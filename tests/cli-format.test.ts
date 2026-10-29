@@ -4,6 +4,7 @@ import {
   formatToolProgress,
   formatError,
   formatHelp,
+  formatSessionReport,
 } from '../src/transport/cli/format.js';
 import type { OrchestratorResult } from '../src/agents/orchestrator.js';
 import type { ToolProgressEvent } from '../src/llm/types.js';
@@ -113,10 +114,38 @@ describe('formatHelp', () => {
     expect(out).toContain('/quit');
     expect(out).toContain('/clear');
     expect(out).toContain('/reset');
+    expect(out).toContain('/stats');
   });
 
   it('упоминает отправку текста агенту', () => {
     const out = formatHelp(false);
     expect(out).toContain('агенту');
+  });
+});
+
+describe('formatSessionReport', () => {
+  it('содержит число прогонов, вызовы тулов и токены', () => {
+    const report = {
+      runs: 3,
+      toolCalls: { ok: 5, error: 1 },
+      tokens: { prompt: 300, completion: 150, total: 450, available: true },
+    };
+    const out = formatSessionReport(report, false);
+    expect(out).toContain('Прогонов: 3');
+    expect(out).toContain('5 ок');
+    expect(out).toContain('1 ошибок');
+    expect(out).toContain('промпт 300');
+    expect(out).toContain('генерация 150');
+    expect(out).toContain('всего 450');
+  });
+
+  it('без данных о токенах — сообщение о недоступности', () => {
+    const report = {
+      runs: 1,
+      toolCalls: { ok: 0, error: 0 },
+      tokens: { prompt: 0, completion: 0, total: 0, available: false },
+    };
+    const out = formatSessionReport(report, false);
+    expect(out).toContain('недоступны');
   });
 });

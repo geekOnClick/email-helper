@@ -7,7 +7,9 @@
  */
 import { getTool } from '../tools/registry.js';
 import { serializeToolResult } from './result-serializer.js';
+import { noopToolLogger, type ToolLogger } from '../observability/logger.js';
 import type { RouterAiClient } from '../llm/routerai-client.js';
+import { addUsage } from '../llm/types.js';
 import type {
   AgentRole,
   ChatMessage,
@@ -48,6 +50,8 @@ export interface ToolLoopOptions {
   role?: AgentRole;
   /** Наблюдатель прогресса цикла (опц.): испускает события по тулам и усечению. */
   onToolEvent?: (event: ToolProgressEvent) => void;
+  /** Логгер вызовов тулов (опц., аудит): фиксирует имя, статус, длительность, summary. */
+  toolLogger?: ToolLogger;
 }
 
 /** Результат цикла tool-calling. */
@@ -95,35 +99,66 @@ function isToolError(content: string): boolean {
 export class RegistryToolResolver implements ToolResolver {
   private readonly extraTools: Map<string, ToolDef>;
   private readonly maxToolResultChars: number;
+  private readonly toolLogger: ToolLogger;
 
-  constructor(maxToolResultChars: number, extraTools: ToolDef[] = []) {
+  constructor(
+    maxToolResultChars: number,
+    extraTools: ToolDef[] = [],
+    toolLogger: ToolLogger = noopToolLogger(),
+  ) {
     this.maxToolResultChars = maxToolResultChars;
     this.extraTools = new Map(extraTools.map((t) => [t.name, t]));
+    this.toolLogger = toolLogger;
   }
 
   async resolve(toolCall: ToolCall): Promise<ToolResultMessage> {
     // Невалидные аргументы — модель отдаёт некорректный JSON для args.
     if (toolCall.args === null) {
       const reason = toolCall.parseError ?? 'пустые аргументы';
-      return toolResultMessage(
-        toolCall.id,
-        `Невалидные аргументы тулa ${toolCall.name}: ${reason}`,
-      );
+      const summary = `Невалидные аргументы тулa ${toolCall.name}: ${reason}`;
+      this.toolLogger.logToolCall({
+        toolName: toolCall.name,
+        status: 'error',
+        durationMs: 0,
+        summary: progressSummary(summary),
+      });
+      return toolResultMessage(toolCall.id, summary);
     }
 
     // Сначала доп. тулы (delegate и пр.), затем реестр.
     const def = this.extraTools.get(toolCall.name) ?? getTool(toolCall.name);
     if (!def) {
-      return toolResultMessage(toolCall.id, `Тул не найден: ${toolCall.name}`);
+      const summary = `Тул не найден: ${toolCall.name}`;
+      this.toolLogger.logToolCall({
+        toolName: toolCall.name,
+        status: 'error',
+        durationMs: 0,
+        summary: progressSummary(summary),
+      });
+      return toolResultMessage(toolCall.id, summary);
     }
 
+    const start = Date.now();
     try {
       const result = await def.handler(toolCall.args as Record<string, unknown>);
       const content = serializeToolResult(result, this.maxToolResultChars);
+      this.toolLogger.logToolCall({
+        toolName: toolCall.name,
+        status: 'ok',
+        durationMs: Date.now() - start,
+        summary: progressSummary(content),
+      });
       return toolResultMessage(toolCall.id, content);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      return toolResultMessage(toolCall.id, `Ошибка тулa ${toolCall.name}: ${msg}`);
+      const summary = `Ошибка тулa ${toolCall.name}: ${msg}`;
+      this.toolLogger.logToolCall({
+        toolName: toolCall.name,
+        status: 'error',
+        durationMs: Date.now() - start,
+        summary: progressSummary(summary),
+      });
+      return toolResultMessage(toolCall.id, summary);
     }
   }
 }
@@ -136,10 +171,15 @@ export class RegistryToolResolver implements ToolResolver {
  */
 export async function runToolLoop(opts: ToolLoopOptions): Promise<ToolLoopResult> {
   const resolver =
-    opts.resolver ?? new RegistryToolResolver(opts.maxToolResultChars, opts.extraTools ?? []);
+    opts.resolver ??
+    new RegistryToolResolver(
+      opts.maxToolResultChars,
+      opts.extraTools ?? [],
+      opts.toolLogger ?? noopToolLogger(),
+    );
   const allToolCalls: ToolCall[] = [];
   let lastContent = '';
-  let lastUsage: Usage | undefined;
+  let totalUsage: Usage | undefined;
   let truncated = false;
 
   for (let iteration = 0; iteration < opts.maxIterations; iteration++) {
@@ -150,7 +190,7 @@ export async function runToolLoop(opts: ToolLoopOptions): Promise<ToolLoopResult
     });
 
     lastContent = result.content;
-    lastUsage = result.usage;
+    totalUsage = addUsage(totalUsage, result.usage);
 
     // Финал: модель ответила текстом без вызовов.
     if (result.toolCalls.length === 0) {
@@ -159,7 +199,7 @@ export async function runToolLoop(opts: ToolLoopOptions): Promise<ToolLoopResult
         toolCalls: allToolCalls,
         iterations: iteration + 1,
         truncated: false,
-        usage: result.usage,
+        usage: totalUsage,
       };
     }
 
@@ -204,7 +244,7 @@ export async function runToolLoop(opts: ToolLoopOptions): Promise<ToolLoopResult
     toolCalls: allToolCalls,
     iterations: opts.maxIterations,
     truncated,
-    usage: lastUsage,
+    usage: totalUsage,
   };
 }
 

@@ -15,6 +15,7 @@ import { createAnalyzer } from './analyzer.js';
 import { createHelper } from './helper.js';
 import { registerMailConnectTools, getSharedSessionStore } from '../tools/mail/register-tools.js';
 import { registerVectorTools } from '../tools/vector/register-tools.js';
+import { consoleToolLogger, type ToolLogger } from '../observability/logger.js';
 import type { MailAccount } from '../tools/mail/types.js';
 import type { CreateMailProviderOptions } from '../tools/mail/providers/factory.js';
 import type { SmtpTransportFactory } from '../tools/mail/smtp-client.js';
@@ -47,6 +48,8 @@ export interface ComposeAgentsOptions {
   maxIterations?: number;
   /** Переопределение лимита символов результата тулa. */
   maxToolResultChars?: number;
+  /** Логгер вызовов тулов (опц.); по умолчанию создаётся консольный с маскированием секретов аккаунтов. */
+  toolLogger?: ToolLogger;
 }
 
 /**
@@ -77,9 +80,14 @@ export async function composeAgents(opts: ComposeAgentsOptions): Promise<Orchest
     });
   }
 
-  // 2. Субагенты: анализатор + помощник.
-  const analyzer = await createAnalyzer({ client: opts.client, config: opts.config });
-  const helper = await createHelper({ client: opts.client, config: opts.config });
+  // 2. Субагенты: анализатор + помощник (логгер тулов общий для всех).
+  const toolLogger =
+    opts.toolLogger ??
+    consoleToolLogger({
+      secrets: opts.accounts.map((a) => a.password),
+    });
+  const analyzer = await createAnalyzer({ client: opts.client, config: opts.config, toolLogger });
+  const helper = await createHelper({ client: opts.client, config: opts.config, toolLogger });
 
   // 3. Оркестратор с обоими субагентами → delegate доступен оркестратору.
   return Orchestrator.create({
@@ -88,5 +96,6 @@ export async function composeAgents(opts: ComposeAgentsOptions): Promise<Orchest
     subagents: [analyzer, helper],
     maxIterations: opts.maxIterations,
     maxToolResultChars: opts.maxToolResultChars,
+    toolLogger,
   });
 }
