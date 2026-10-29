@@ -1,5 +1,5 @@
 import type { ImapFlowOptions } from 'imapflow';
-import type { AuthStrategy } from '../mail-provider.js';
+import type { AuthStrategy, SmtpAuth, SmtpConnectionOptions } from '../mail-provider.js';
 import type { ImapConnectionOptions, MailAccount } from '../types.js';
 import type { OAuthTokenStore, StoredToken } from '../oauth/token-store.js';
 import type { MSDeviceFlowClient } from '../oauth/device-flow.js';
@@ -45,6 +45,17 @@ export class OAuth2MsalStrategy implements AuthStrategy {
       logger: connection.logger ?? false,
       auth: { user: account.login, accessToken },
     };
+  }
+
+  async getSmtpAuth(
+    account: MailAccount,
+    _connection: SmtpConnectionOptions,
+  ): Promise<SmtpAuth> {
+    if (!this.cfg.clientId) {
+      throw new Error('OAuth2: MS_CLIENT_ID не задан (задача 5.6)');
+    }
+    const accessToken = await this.obtainAccessToken(account);
+    return { user: account.login, accessToken };
   }
 
   private async obtainAccessToken(account: MailAccount): Promise<string> {

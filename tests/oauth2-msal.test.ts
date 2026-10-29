@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { MailAccount, ImapConnectionOptions } from '../src/tools/mail/types.js';
 import type { MSDeviceFlowClient } from '../src/tools/mail/oauth/device-flow.js';
+import type { SmtpConnectionOptions } from '../src/tools/mail/mail-provider.js';
 
 const account: MailAccount = {
   provider: 'outlook',
@@ -130,6 +131,66 @@ describe('OAuth2MsalStrategy', () => {
     await withStore(async (store) => {
       const strat = new OAuth2MsalStrategy({ clientId: '', tenant: 'consumers' }, store, mockDeviceFlow());
       await expect(strat.getImapAuth(account, connection)).rejects.toThrow(/MS_CLIENT_ID/);
+    });
+  });
+});
+
+const smtpConnection: SmtpConnectionOptions = {
+  host: 'smtp-mail.outlook.com',
+  port: 587,
+  secure: false,
+};
+
+describe('OAuth2MsalStrategy.getSmtpAuth', () => {
+  it('валидный access token из store — без flow', async () => {
+    await withStore(async (store) => {
+      await store.set(account.login, {
+        accessToken: 'AT-stored',
+        refreshToken: 'RT-stored',
+        expiresAt: Date.now() + 3_600_000,
+      });
+      const flow = mockDeviceFlow();
+      const strat = new OAuth2MsalStrategy(cfg, store, flow);
+      const auth = await strat.getSmtpAuth(account, smtpConnection);
+      expect(auth).toEqual({ user: account.login, accessToken: 'AT-stored' });
+      expect(flow.requestDeviceCode).not.toHaveBeenCalled();
+      expect(flow.refresh).not.toHaveBeenCalled();
+    });
+  });
+
+  it('истёкший access + валидный refresh — refresh flow, без device code', async () => {
+    await withStore(async (store) => {
+      await store.set(account.login, {
+        accessToken: 'AT-old',
+        refreshToken: 'RT-stored',
+        expiresAt: Date.now() - 1000,
+      });
+      const flow = mockDeviceFlow({
+        refresh: vi.fn().mockResolvedValue({ accessToken: 'AT-refreshed', refreshToken: 'RT-new', expiresInSeconds: 3600 }),
+      });
+      const strat = new OAuth2MsalStrategy(cfg, store, flow);
+      const auth = await strat.getSmtpAuth(account, smtpConnection);
+      expect(auth).toEqual({ user: account.login, accessToken: 'AT-refreshed' });
+      expect(flow.refresh).toHaveBeenCalledWith('RT-stored');
+      expect(flow.requestDeviceCode).not.toHaveBeenCalled();
+    });
+  });
+
+  it('нет токена вообще — device code flow', async () => {
+    await withStore(async (store) => {
+      const flow = mockDeviceFlow();
+      const strat = new OAuth2MsalStrategy(cfg, store, flow);
+      const auth = await strat.getSmtpAuth(account, smtpConnection);
+      expect(auth).toEqual({ user: account.login, accessToken: 'AT-device' });
+      expect(flow.requestDeviceCode).toHaveBeenCalledTimes(1);
+      expect(flow.pollForToken).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('бросает, если clientId пуст', async () => {
+    await withStore(async (store) => {
+      const strat = new OAuth2MsalStrategy({ clientId: '', tenant: 'consumers' }, store, mockDeviceFlow());
+      await expect(strat.getSmtpAuth(account, smtpConnection)).rejects.toThrow(/MS_CLIENT_ID/);
     });
   });
 });

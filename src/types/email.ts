@@ -105,3 +105,43 @@ export interface DownloadResult {
   /** UID письма. */
   uid: number;
 }
+
+// === mail-send: критерии письма и валидация ===
+
+/** Вложение отправляемого письма (локальный файл). */
+export interface MailAttachmentInput {
+  /** Абсолютный путь к локальному файлу. */
+  path: string;
+}
+
+/**
+ * Критерии письма для отправки (Фаза 4, mail-send).
+ * Получатели TO (обязательно), опц. CC/BCC; тема и текстовое тело обязательны;
+ * HTML-альтернатива, вложения и кодировка — опциональны.
+ */
+export interface ComposeMailInput {
+  /** Получатели TO (≥1). */
+  to: EmailAddress[];
+  /** Получатели CC (опц.). */
+  cc?: EmailAddress[];
+  /** Получатели BCC (опц.). */
+  bcc?: EmailAddress[];
+  /** Тема письма (непустое). */
+  subject: string;
+  /** Текстовое тело (text/plain, обязательно). */
+  text: string;
+  /** HTML-альтернатива тела (text/html, опц.). */
+  html?: string;
+  /** Вложения — локальные файлы (опц.). */
+  attachments?: MailAttachmentInput[];
+  /** Кодировка текста (по умолчанию utf-8). */
+  encoding?: string;
+}
+
+/** Результат валидации критериев письма. */
+export interface ValidationResult {
+  /** true — критерии валидны, можно отправлять. */
+  valid: boolean;
+  /** Список ошибок валидации (пустой, если valid). */
+  errors: string[];
+}

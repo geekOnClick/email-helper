@@ -20,13 +20,14 @@ import type { RouterAiClient } from '../llm/routerai-client.js';
 import type { Config } from '../config/schema.js';
 import type { ChatMessage } from '../llm/types.js';
 
-/** Тулы реестра, доступные помощнику (рутина Фазы 1). */
+/** Тулы реестра, доступные помощнику (рутина Фаз 1–4). */
 const HELPER_TOOLS: readonly string[] = [
   'mail.connect',
   'mail.listFolders',
   'mail.search',
   'mail.fetch',
   'mail.downloadAttachments',
+  'mail.send',
   'embeddings.index',
   'vector.search',
 ];

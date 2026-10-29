@@ -38,7 +38,8 @@ export interface MSDeviceFlowConfig {
   prompt?: (msg: string) => void;
 }
 
-const DEFAULT_SCOPE = 'offline_access https://outlook.office.com/IMAP.AccessAsUser.All';
+const DEFAULT_SCOPE =
+  'offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send';
 
 /** Ошибки device code flow. */
 export class DeviceFlowError extends Error {

@@ -7,6 +7,24 @@ import type {
 } from './types.js';
 import type { SearchCriteria, SearchResult, EmailFull, DownloadResult } from '../../types/email.js';
 
+/** Параметры SMTP-соединения (host/port/secure), специфичные для провайдера. */
+export interface SmtpConnectionOptions {
+  host: string;
+  port: number;
+  /** true = неявный TLS (465); false = STARTTLS (587). */
+  secure: boolean;
+}
+
+/**
+ * Аутентификация для SMTP (nodemailer-совместимая).
+ * basic → { user, pass }; oauth2 (XOAUTH2) → { user, accessToken }.
+ */
+export interface SmtpAuth {
+  user: string;
+  pass?: string;
+  accessToken?: string;
+}
+
 /**
  * Стратегия аутентификации для IMAP.
  * Реализации: BasicAuthStrategy, OAuth2MsalStrategy.
@@ -22,6 +40,12 @@ export interface AuthStrategy {
    * Может инициировать интерактивный flow (device code) при отсутствии токена.
    */
   getImapAuth(account: MailAccount, connection: ImapConnectionOptions): Promise<ImapFlowOptions>;
+  /**
+   * Возвращает аутентификацию для SMTP (nodemailer): basic → {user, pass},
+   * oauth2 → {user, accessToken}. Переиспользует те же учётные данные/токены,
+   * что и IMAP (одна стратегия = одни credentials для обоих протоколов).
+   */
+  getSmtpAuth(account: MailAccount, connection: SmtpConnectionOptions): Promise<SmtpAuth>;
 }
 
 /**

@@ -66,4 +66,23 @@ function buildOAuth2Strategy(opts: CreateMailProviderOptions): OAuth2MsalStrateg
   return makeOAuth2Strategy(cfg, store, flow);
 }
 
+/**
+ * Строит AuthStrategy по аккаунту (без провайдера/IMAP-сессии) — для SMTP-клиента.
+ * Яндекс → BasicAuthStrategy; Outlook → по account.authStrategy (oauth2 | basic).
+ * Auto-detect (fallback basic→oauth2) здесь не применяется: для SMTP берётся
+ * основная стратегия аккаунта, та же, что выбрана для IMAP (спека mail/send).
+ */
+export function createAuthStrategyForAccount(
+  account: MailAccount,
+  opts: CreateMailProviderOptions = {},
+): AuthStrategy {
+  if (account.provider === 'yandex') {
+    return new BasicAuthStrategy();
+  }
+  if (account.provider === 'outlook') {
+    return account.authStrategy === 'oauth2' ? buildOAuth2Strategy(opts) : new BasicAuthStrategy();
+  }
+  throw new Error(`неизвестный провайдер: ${(account as { provider?: string }).provider ?? '?'}`);
+}
+
 export type { AuthStrategy };

@@ -22,7 +22,10 @@ export default tseslint.config(
   },
   {
     rules: {
-      '@typescript-eslint/no-unused-vars': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
       // Разрешаем any в отдельных местах последующих фаз при необходимости
       '@typescript-eslint/no-explicit-any': 'warn',
     },

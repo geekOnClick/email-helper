@@ -4,9 +4,11 @@ import { createMailListFoldersTool } from './mail-list-folders.tool.js';
 import { createMailSearchTool } from './mail-search.tool.js';
 import { createMailFetchTool } from './mail-fetch.tool.js';
 import { createMailDownloadAttachmentsTool } from './mail-download-attachments.tool.js';
+import { createMailSendTool } from './mail-send.tool.js';
 import { MailSessionStore } from './session-store.js';
 import type { MailAccount } from './types.js';
 import type { CreateMailProviderOptions } from './providers/factory.js';
+import type { SmtpTransportFactory } from './smtp-client.js';
 
 export interface RegisterToolsDeps {
   accounts: MailAccount[];
@@ -15,6 +17,8 @@ export interface RegisterToolsDeps {
   sessionStore?: MailSessionStore;
   /** Каталог по умолчанию для скачивания вложений (DOWNLOAD_DIR из конфига). */
   downloadDir?: string;
+  /** Инжектируемая фабрика SMTP-транспорта для mail.send (по умолчанию — nodemailer). */
+  smtpTransportFactory?: SmtpTransportFactory;
 }
 
 /**
@@ -39,6 +43,15 @@ export function registerMailConnectTools(deps: RegisterToolsDeps): MailSessionSt
     createMailDownloadAttachmentsTool({
       sessionStore,
       defaultDownloadDir: deps.downloadDir ?? './downloads',
+    }),
+  );
+  registerTool(
+    createMailSendTool({
+      sessionStore,
+      accounts: deps.accounts,
+      oauth2: deps.oauth2,
+      tokenStorePath: deps.tokenStorePath,
+      transportFactory: deps.smtpTransportFactory,
     }),
   );
 

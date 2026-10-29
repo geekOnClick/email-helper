@@ -17,6 +17,11 @@ export class MailSessionStore {
     return this.sessions.get(login)?.provider;
   }
 
+  /** Аккаунт сохранённой сессии (для тулов, переиспользующих учётные данные SMTP). */
+  getAccount(login: string): MailAccount | undefined {
+    return this.sessions.get(login)?.account;
+  }
+
   has(login: string): boolean {
     return this.sessions.has(login);
   }

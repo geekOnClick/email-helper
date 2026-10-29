@@ -17,6 +17,7 @@ import { registerMailConnectTools, getSharedSessionStore } from '../tools/mail/r
 import { registerVectorTools } from '../tools/vector/register-tools.js';
 import type { MailAccount } from '../tools/mail/types.js';
 import type { CreateMailProviderOptions } from '../tools/mail/providers/factory.js';
+import type { SmtpTransportFactory } from '../tools/mail/smtp-client.js';
 import type { RouterAiClient } from '../llm/routerai-client.js';
 import type { EmbeddingsClient } from '../llm/embeddings.js';
 import type { FalkorClient } from '../tools/vector/falkor.js';
@@ -36,6 +37,8 @@ export interface ComposeAgentsOptions {
   tokenStorePath?: string;
   /** Каталог по умолчанию для скачивания вложений. */
   downloadDir?: string;
+  /** Инжектируемая фабрика SMTP-транспорта для mail.send (по умолчанию — nodemailer). */
+  smtpTransportFactory?: SmtpTransportFactory;
   /** Клиент embeddings для векторных тулов (опц.). Если передан — регистрируются embeddings.index/vector.search. */
   embeddingsClient?: EmbeddingsClient;
   /** Клиент FalkorDB для векторных тулов (опц.). Если передан — регистрируются embeddings.index/vector.search. */
@@ -62,6 +65,7 @@ export async function composeAgents(opts: ComposeAgentsOptions): Promise<Orchest
     tokenStorePath: opts.tokenStorePath,
     sessionStore: getSharedSessionStore(),
     downloadDir: opts.downloadDir,
+    smtpTransportFactory: opts.smtpTransportFactory,
   });
 
   // 1b. Регистрация векторных тулов — только если оба клиента переданы.

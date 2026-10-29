@@ -19,3 +19,7 @@ export {
 } from './providers/outlook.js';
 export { probeOutlookBasicAuth } from './providers/outlook-probe.js';
 export { redact } from './redact.js';
+export { SmtpClient, createDefaultTransport } from './smtp-client.js';
+export type { SmtpTransport, SmtpTransportFactory, SmtpSendMailOptions, SmtpSendResult } from './smtp-client.js';
+export { smtpConnectionFor, YANDEX_SMTP, OUTLOOK_SMTP } from './providers/smtp-options.js';
+export type { SmtpAuth, SmtpConnectionOptions } from './mail-provider.js';

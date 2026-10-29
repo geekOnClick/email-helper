@@ -103,6 +103,12 @@ function registerRoutineStubs(): void {
     inputSchema: { type: 'object' },
     handler: async () => ({ paths: ['/tmp/a.txt'], folder: 'INBOX', uid: 1 }),
   });
+  registerTool({
+    name: 'mail.send',
+    description: 'отправка (стаб)',
+    inputSchema: { type: 'object' },
+    handler: async () => ({ ready: true, messageId: '<test@smtp>', recipients: [] }),
+  });
 }
 
 describe('Helper (субагент-помощник)', () => {
@@ -202,11 +208,12 @@ describe('Helper (субагент-помощник)', () => {
     });
     await helper.run('hi');
 
-    expect(requests[0]?.toolsCount).toBe(5);
+    expect(requests[0]?.toolsCount).toBe(6);
     const names = requests[0]?.toolNames ?? [];
     expect(names).toContain('mail_connect');
     expect(names).toContain('mail_search');
     expect(names).toContain('mail_downloadAttachments');
+    expect(names).toContain('mail_send');
     expect(names).not.toContain('delegate');
   });
 });

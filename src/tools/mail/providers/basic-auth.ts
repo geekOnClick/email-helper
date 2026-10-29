@@ -1,5 +1,5 @@
 import type { ImapFlowOptions } from 'imapflow';
-import type { AuthStrategy } from '../mail-provider.js';
+import type { AuthStrategy, SmtpAuth, SmtpConnectionOptions } from '../mail-provider.js';
 import type { ImapConnectionOptions, MailAccount } from '../types.js';
 
 /**
@@ -19,5 +19,9 @@ export class BasicAuthStrategy implements AuthStrategy {
       auth: { user: account.login, pass: account.password },
     };
     return Promise.resolve(opts);
+  }
+
+  getSmtpAuth(account: MailAccount, _connection: SmtpConnectionOptions): Promise<SmtpAuth> {
+    return Promise.resolve({ user: account.login, pass: account.password });
   }
 }
