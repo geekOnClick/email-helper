@@ -35,3 +35,53 @@
 - [x] 5.2 `npx tsc --noEmit` — без ошибок. Проверка: exit 0.
 - [x] 5.3 `npm run lint` — без ошибок. Проверка: exit 0.
 - [x] 5.4 `openspec validate guided-commands --strict` — проходит. Проверка: exit 0.
+
+### Доп. фикс: автоподключение IMAP-сессии в guided-командах
+
+Guided-команды вызывают IMAP-тулы (`mail.search`, `mail.fetch`,
+`mail.downloadAttachments`, `mail.send`) напрямую, минуя LLM-цикл оркестратора.
+В оркестраторе LLM сам вызывает `mail.connect` перед остальными тулами. В guided-режиме этого шага не было → команды падали с «подключение не установлено».
+
+- [x] Создан `src/transport/cli/commands/connect.ts` (`ensureMailConnected`):
+  проверяет `SessionStore.has(login)`, при отсутствии вызывает тул
+  `mail.connect`, выводит прогресс/ошибки в io.
+- [x] Все 4 команды (`/find`, `/analyze`, `/download`, `/send`) вызывают
+  `ensureMailConnected(io, account)` после выбора аккаунта, перед операцией.
+- [x] Unit-тесты команд: `seedSession()` в `beforeEach` (pre-seed
+  `getSharedSessionStore`) чтобы `ensureMailConnected` не вызывал реальный
+  `mail.connect`.
+- [x] Тест `tests/cli-commands-connect.test.ts` (4 теста): сессия есть →
+  skip, нет → вызов connect, ошибка → false, тул не зарегистрирован → false.
+- [x] E2E тесты уже pre-seed сессию через `getSharedSessionStore().set()`.
+- [x] Итог: 404 passed / 14 skipped, tsc/lint чисто.
+
+### Доп. фикс 2: client-side fallback для IMAP SEARCH (Яндекс)
+
+**Проблема:** IMAP SEARCH на Яндексе ненадёжен — `SEARCH SUBJECT "Нормоконтроль"`
+возвращает 0 даже при точном совпадении темы с кириллицей. Даже ASCII
+`SEARCH FROM "Kozloww1508@yandex.ru"` не находит письмо (подтверждено
+диагностикой через сырые IMAP-команды). imapflow автоматически добавляет
+`CHARSET UTF-8` для литералов, но Яндекс всё равно не ищет корректно.
+
+**Решение:** добавлен client-side fallback в `AbstractImapProvider.search()`:
+- Если серверный search по текстовым критериям (`subject`/`from`/`to`)
+  вернул 0 — выполняется `fetchAll('1:*')` метаданных и локальная фильтрация.
+- `hasTextCriteria()` — проверка наличия subject/from/to.
+- `clientSideSearch()` — fetch всех метаданных + фильтрация.
+- `matchesCriteria()` — локальный AND по всем критериям (subject/from/to
+  подстрочно без учёта регистра; since/before по дате; unseen/flagged/
+  answered по флагам).
+- Флаги и даты также применяются локально при fallback.
+- Если серверный search нашёл совпадения — fallback не вызывается.
+
+**Файлы:**
+- `src/tools/mail/providers/abstract-imap-provider.ts` — fallback-логика.
+- `tests/imap-client-side-search.test.ts` — 10 тестов (subject/from/to
+  кириллица, подстрока, имя отправителя, комбинированный фильтр с датой,
+  сервер нашёл → fallback не нужен, без текстовых критериев → fallback
+  не нужен, нет совпадений).
+
+**Проверено на реальном Яндексе:** `subject="Нормоконтроль"` → UID=2 ✓,
+`subject="ВКР"` → UID=2 ✓, `from="Kozloww1508@yandex.ru"` → UID=2 ✓.
+
+- [x] Итог: 414 passed / 14 skipped, tsc/lint чисто.

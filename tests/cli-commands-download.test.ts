@@ -3,9 +3,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { resetTools, registerTool } from '../src/tools/registry.js';
+import { getSharedSessionStore } from '../src/tools/mail/register-tools.js';
 import { runDownloadCommand, getDefaultDownloadDir } from '../src/transport/cli/commands/download.js';
 import { MockConsoleIO } from './mock-io.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
+import type { MailProvider } from '../src/tools/mail/mail-provider.js';
 import type { SearchResult, DownloadResult } from '../src/types/email.js';
 
 const ACCOUNT: MailAccount = {
@@ -15,8 +17,23 @@ const ACCOUNT: MailAccount = {
   authStrategy: 'basic',
 };
 
+/** Pre-seed IMAP-сессии для guided-команд (подключение не вызывается). */
+function seedSession(account: MailAccount = ACCOUNT): void {
+  getSharedSessionStore().set(account, {
+    connect: async () => ({ ok: true, login: account.login }),
+    listFolders: async () => [],
+    search: async () => ({ messages: [], total: 0, hasMore: false }),
+    fetch: async () => ({}),
+    downloadAttachments: async () => ({ paths: [], folder: 'INBOX', uid: 0 }),
+    dispose: async () => {},
+  } as unknown as MailProvider);
+}
+
 describe('runDownloadCommand', () => {
-  beforeEach(() => resetTools());
+  beforeEach(() => {
+    resetTools();
+    seedSession();
+  });
 
   it('скачивание вложений → вывод путей', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eh-dl-'));

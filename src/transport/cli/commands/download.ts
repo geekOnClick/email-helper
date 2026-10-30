@@ -10,6 +10,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ConsoleIO } from '../io.js';
 import { promptSearchCriteria, promptAccount, promptUid } from '../prompts.js';
+import { ensureMailConnected } from './connect.js';
 import { formatMessageList } from '../format.js';
 import { getTool } from '../../../tools/registry.js';
 import type { MailAccount } from '../../../tools/mail/types.js';
@@ -37,6 +38,8 @@ export async function runDownloadCommand(deps: DownloadCommandDeps): Promise<voi
 
   const account = await promptAccount(io, accounts);
   if (!account) return;
+
+  if (!(await ensureMailConnected(io, account))) return;
 
   const searchTool = getTool('mail.search');
   const downloadTool = getTool('mail.downloadAttachments');

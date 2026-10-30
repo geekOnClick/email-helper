@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetTools, registerTool } from '../src/tools/registry.js';
+import { getSharedSessionStore } from '../src/tools/mail/register-tools.js';
 import { runFindCommand } from '../src/transport/cli/commands/find.js';
 import { MockConsoleIO } from './mock-io.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
+import type { MailProvider } from '../src/tools/mail/mail-provider.js';
 import type { SearchResult } from '../src/types/email.js';
 
 const ACCOUNT: MailAccount = {
@@ -11,6 +13,18 @@ const ACCOUNT: MailAccount = {
   password: 'stub',
   authStrategy: 'basic',
 };
+
+/** Pre-seed IMAP-сессии для guided-команд (подключение не вызывается). */
+function seedSession(account: MailAccount = ACCOUNT): void {
+  getSharedSessionStore().set(account, {
+    connect: async () => ({ ok: true, login: account.login }),
+    listFolders: async () => [],
+    search: async () => ({ messages: [], total: 0, hasMore: false }),
+    fetch: async () => ({}),
+    downloadAttachments: async () => ({ paths: [], folder: 'INBOX', uid: 0 }),
+    dispose: async () => {},
+  } as unknown as MailProvider);
+}
 
 function makeMessages(): SearchResult['messages'] {
   return [
@@ -36,7 +50,10 @@ function makeMessages(): SearchResult['messages'] {
 }
 
 describe('runFindCommand', () => {
-  beforeEach(() => resetTools());
+  beforeEach(() => {
+    resetTools();
+    seedSession();
+  });
 
   it('находит письма → вывод списка', async () => {
     registerTool({

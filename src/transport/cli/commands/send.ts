@@ -7,6 +7,7 @@
  */
 import type { ConsoleIO } from '../io.js';
 import { promptSendCriteria, promptAccount, promptConfirm } from '../prompts.js';
+import { ensureMailConnected } from './connect.js';
 import { formatDraft } from '../format.js';
 import { getTool } from '../../../tools/registry.js';
 import type { MailAccount } from '../../../tools/mail/types.js';
@@ -31,6 +32,8 @@ export async function runSendCommand(deps: SendCommandDeps): Promise<void> {
 
   const account = await promptAccount(io, accounts);
   if (!account) return;
+
+  if (!(await ensureMailConnected(io, account))) return;
 
   // Черновик для предпросмотра.
   const draft = {

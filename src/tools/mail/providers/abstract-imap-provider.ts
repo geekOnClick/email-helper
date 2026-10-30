@@ -17,7 +17,7 @@ import type {
   MailAccount,
   MailProviderKind,
 } from '../types.js';
-import type { SearchCriteria, SearchResult, EmailFull, DownloadResult } from '../../../types/email.js';
+import type { SearchCriteria, SearchResult, EmailMessage, EmailAddress, EmailFull, DownloadResult } from '../../../types/email.js';
 
 /** Фабрика IMAP-клиента. По умолчанию ImapFlow; в тестах подменяется. */
 export type ImapClientFactory = (options: ImapFlowOptions) => ImapClient;
@@ -111,12 +111,21 @@ export abstract class AbstractImapProvider implements MailProvider {
       // 2. строим SearchObject из критериев (AND по умолчанию)
       const query = this.buildSearchObject(criteria);
       const uids = await client.search(query, { uid: true });
-      const total = uids.length;
+
+      // 2b. Client-side fallback: некоторые IMAP-серверы (Яндекс) ненадёжно
+      // ищут по SUBJECT/FROM/BODY с кириллицей/литералами — SEARCH возвращает 0
+      // даже при совпадении. Если серверный search по текстовым критериям
+      // ничего не нашёл, делаем fetchAll метаданных и фильтруем локально.
+      let effectiveUids = uids;
+      if (effectiveUids.length === 0 && this.hasTextCriteria(criteria)) {
+        effectiveUids = await this.clientSideSearch(client, criteria);
+      }
+      const total = effectiveUids.length;
 
       // 3. limit/offset
       const limit = criteria.limit ?? 50;
       const offset = criteria.offset ?? 0;
-      const slice = uids.slice(offset, offset + limit);
+      const slice = effectiveUids.slice(offset, offset + limit);
       const hasMore = offset + limit < total;
 
       if (slice.length === 0) {
@@ -154,6 +163,74 @@ export abstract class AbstractImapProvider implements MailProvider {
     if (criteria.flagged === true) q.flagged = true;
     if (criteria.answered === true) q.answered = true;
     return q;
+  }
+
+  /** Есть ли текстовые критерии (subject/from/to/body), которые могут не искаться сервером. */
+  protected hasTextCriteria(criteria: SearchCriteria): boolean {
+    return Boolean(criteria.subject || criteria.from || criteria.to);
+  }
+
+  /**
+   * Client-side fallback: fetch всех метаданных и фильтрация по текстовым
+   * критериям локально. Используется когда серверный SEARCH (Яндекс)
+   * ненадёжно ищет по SUBJECT/FROM/TO с кириллицей или литералами.
+   *
+   * Возвращает UID'ы совпадающих писем. Доп. флаги (unseen/flagged/answered)
+   * и даты (since/before) также применяются локально.
+   */
+  protected async clientSideSearch(client: ImapClient, criteria: SearchCriteria): Promise<number[]> {
+    const fetchQuery: FetchQueryObject = {
+      uid: true,
+      envelope: true,
+      internalDate: true,
+      flags: true,
+      size: true,
+    };
+    const rows = await client.fetchAll('1:*', fetchQuery, { uid: true });
+    const matched: number[] = [];
+    for (const row of rows) {
+      const msg = toEmailMessage(row, '');
+      if (!this.matchesCriteria(msg, criteria)) continue;
+      matched.push(msg.uid);
+    }
+    // UID'ы возвращаются fetchAll в порядке возрастания, но гарантируем сортировку.
+    return matched.sort((a, b) => a - b);
+  }
+
+  /** Проверка письма против всех критериев (локальный AND). */
+  protected matchesCriteria(msg: EmailMessage, criteria: SearchCriteria): boolean {
+    const subj = (msg.subject ?? '').toLowerCase();
+    if (criteria.subject && !subj.includes(criteria.subject.toLowerCase())) return false;
+
+    const fromAddr = (msg.from?.address ?? '').toLowerCase();
+    const fromName = (msg.from?.name ?? '').toLowerCase();
+    const fromAll = `${fromAddr} ${fromName}`;
+    if (criteria.from) {
+      const f = criteria.from.toLowerCase();
+      if (!fromAll.includes(f)) return false;
+    }
+
+    if (criteria.to) {
+      const t = criteria.to.toLowerCase();
+      const toAll = (msg.to ?? []).map((a: EmailAddress) => `${a.address} ${a.name ?? ''}`.toLowerCase()).join(' ');
+      if (!toAll.includes(t)) return false;
+    }
+
+    if (criteria.since) {
+      const since = new Date(criteria.since);
+      if (!Number.isNaN(since.getTime()) && msg.date < since) return false;
+    }
+    if (criteria.before) {
+      const before = new Date(criteria.before);
+      if (!Number.isNaN(before.getTime()) && msg.date >= before) return false;
+    }
+
+    const flags = msg.flags;
+    if (criteria.unseen === true && flags.includes('\\Seen')) return false;
+    if (criteria.flagged === true && !flags.includes('\\Flagged')) return false;
+    if (criteria.answered === true && !flags.includes('\\Answered')) return false;
+
+    return true;
   }
 
   async fetch(uid: number, folder?: string): Promise<EmailFull> {
