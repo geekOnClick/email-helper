@@ -100,4 +100,30 @@ describe('YandexMailProvider', () => {
     await p.dispose();
     expect(logout).toHaveBeenCalledTimes(1);
   });
+
+  it('dispose очищает учётные данные из памяти (account обнуляется)', async () => {
+    const { factory } = makeFactory({});
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    await p.dispose();
+    // После dispose ссылка на аккаунт обнулена — пароль недоступен из провайдера.
+    expect((p as unknown as { account: unknown }).account).toBeNull();
+  });
+
+  it('после dispose connect выбрасывает «провайдер закрыт»', async () => {
+    const { factory } = makeFactory({});
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    await p.dispose();
+    await expect(p.connect()).rejects.toThrow(/закрыт/);
+  });
+
+  it('после dispose операции выбрасывают «подключение не установлено»', async () => {
+    const { factory } = makeFactory({});
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    await p.dispose();
+    await expect(p.listFolders()).rejects.toThrow(/подключение не установлено/);
+    await expect(p.search({ subject: 'x' })).rejects.toThrow(/подключение не установлено|закрыт/);
+  });
 });

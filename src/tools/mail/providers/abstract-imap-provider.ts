@@ -44,7 +44,7 @@ function looksLikeAuthFailure(err: unknown): boolean {
  */
 export abstract class AbstractImapProvider implements MailProvider {
   protected client: ImapClient | null = null;
-  protected readonly account: MailAccount;
+  protected account: MailAccount | null;
   protected strategy: AuthStrategy;
   protected readonly clientFactory: ImapClientFactory;
 
@@ -59,6 +59,9 @@ export abstract class AbstractImapProvider implements MailProvider {
   abstract get providerKind(): MailProviderKind;
 
   async connect(): Promise<ConnectionResult> {
+    if (this.account === null) {
+      throw new ConnectError('провайдер закрыт (dispose уже вызван)');
+    }
     if (this.client) {
       return { connected: true, accountId: this.accountId(), provider: this.providerKind };
     }
@@ -70,7 +73,8 @@ export abstract class AbstractImapProvider implements MailProvider {
    * выбрасывает ConnectError с редуцированным сообщением.
    */
   protected async tryConnect(strategy: AuthStrategy): Promise<ConnectionResult> {
-    const imapOpts = await strategy.getImapAuth(this.account, this.connection);
+    const account = this.requireAccount();
+    const imapOpts = await strategy.getImapAuth(account, this.connection);
     const client = this.clientFactory(imapOpts);
     try {
       await client.connect();
@@ -102,6 +106,7 @@ export abstract class AbstractImapProvider implements MailProvider {
 
   async search(criteria: SearchCriteria): Promise<SearchResult> {
     const client = this.requireClient();
+    const account = this.requireAccount();
     try {
       // 1. разрешаем папку (явная / direction / по умолчанию incoming)
       const folders = await this.listFolders();
@@ -147,7 +152,7 @@ export abstract class AbstractImapProvider implements MailProvider {
       return { messages, total, hasMore };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new ConnectError(redact(message, this.account.password, this.account.login));
+      throw new ConnectError(redact(message, account.password, account.login));
     }
   }
 
@@ -235,6 +240,7 @@ export abstract class AbstractImapProvider implements MailProvider {
 
   async fetch(uid: number, folder?: string): Promise<EmailFull> {
     const client = this.requireClient();
+    const account = this.requireAccount();
     try {
       const folderPath = await this.resolveFolderForOp(folder, 'incoming');
       await client.mailboxOpen(folderPath, { readOnly: true });
@@ -265,7 +271,7 @@ export abstract class AbstractImapProvider implements MailProvider {
       return { ...base, body, hasBody, attachments };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new ConnectError(redact(message, this.account.password, this.account.login));
+      throw new ConnectError(redact(message, account.password, account.login));
     }
   }
 
@@ -275,6 +281,7 @@ export abstract class AbstractImapProvider implements MailProvider {
     options?: { folder?: string; names?: string[] },
   ): Promise<DownloadResult> {
     const client = this.requireClient();
+    const account = this.requireAccount();
     try {
       const folderPath = await this.resolveFolderForOp(options?.folder, 'incoming');
       await client.mailboxOpen(folderPath, { readOnly: true });
@@ -322,7 +329,7 @@ export abstract class AbstractImapProvider implements MailProvider {
       return { paths, folder: folderPath, uid };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      throw new ConnectError(redact(message, this.account.password, this.account.login));
+      throw new ConnectError(redact(message, account.password, account.login));
     }
   }
 
@@ -343,9 +350,13 @@ export abstract class AbstractImapProvider implements MailProvider {
         // освобождение после ошибки не релевантно
       }
     }
+    // Очистка учётных данных из памяти: обнуляем ссылку на аккаунт, чтобы
+    // пароль стал недостижим и был собран GC. После dispose провайдер
+    // непригоден к использованию (connect выбросит ошибку «закрыт»).
+    this.account = null;
   }
   protected accountId(): string {
-    return this.account.login;
+    return this.account?.login ?? '(disposed)';
   }
 
   protected requireClient(): ImapClient {
@@ -357,17 +368,26 @@ export abstract class AbstractImapProvider implements MailProvider {
     return this.client;
   }
 
+  /** Аккаунт активной (не disposed) сессии. Бросает, если провайдер закрыт. */
+  protected requireAccount(): MailAccount {
+    if (this.account === null) {
+      throw new ConnectError('провайдер закрыт (dispose уже вызван)');
+    }
+    return this.account;
+  }
+
   /** Читабельное сообщение об ошибке подключения без секретов. */
   protected sanitizeConnectError(err: unknown): string {
+    const account = this.requireAccount();
     const e = err as { message?: string; responseStatus?: unknown; responseText?: unknown };
     const msg = e?.message ?? String(err);
     const status = e?.responseStatus;
     const text = e?.responseText;
     if (text) {
       const detail = status ? `${String(status)}: ${String(text)}` : String(text);
-      return redact(detail, this.account.password, this.account.login);
+      return redact(detail, account.password, account.login);
     }
-    return redact(msg, this.account.password, this.account.login);
+    return redact(msg, account.password, account.login);
   }
 
   protected isAuthFailure(err: unknown): boolean {

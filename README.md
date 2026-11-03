@@ -176,6 +176,266 @@ npm run mcp:http
 npm run mcp:http -- --port 3000 --host 127.0.0.1
 ```
 
+### Инструменты MCP
+
+MCP-сервер экспонирует 8 доменных тулов (внутренний `delegate` оркестратора
+скрыт). Все тулы, кроме `vector.search`, требуют предварительного `mail.connect`
+для соответствующего `login` — без активной IMAP-сессии возвращается ошибка
+`подключение не установлено для <login>`.
+
+#### Почтовые тулы
+
+| Тул | Назначение | Обязательные параметры |
+|-----|-----------|----------------------|
+| `mail.connect` | Подключение к ящику по IMAP | `login` |
+| `mail.listFolders` | Список папок ящика | `login` |
+| `mail.search` | Поиск писем по критериям | `login`, `criteria` |
+| `mail.fetch` | Чтение письма (тело + вложения) | `login`, `uid` |
+| `mail.downloadAttachments` | Скачивание вложений письма | `login`, `uid` |
+| `mail.send` | Отправка письма (SMTP) | `login`, `mail`, `confirm` |
+
+**`mail.connect`** — подключение к ящику. Выбирает провайдер и стратегию
+авторизации (basic для Яндекса, OAuth2 для Outlook) и сохраняет IMAP-сессию в
+`MailSessionStore` для последующих тулов. Поддерживает два источника учётных
+данных:
+
+1. **Динамические креды** (опц. блок `credentials`) — передаются вызывающим
+   агентом; позволяют подключиться к ящику, не прописанному в `.env` сервера.
+   Поля: `provider` (`yandex`\|`outlook`), `password`, `authStrategy`
+   (`basic`\|`oauth2`, по умолчанию `basic`). Пароль хранится только в памяти
+   процесса и маскируется в ошибках (`[REDACTED]`).
+2. **Fallback на `.env`** (если `credentials` опущен) — аккаунт ищется в
+   `ACCOUNTS` из `.env` по `login`.
+
+```json
+{
+  "login": "user@yandex.com",
+  "credentials": {
+    "provider": "yandex",
+    "password": "пароль-приложения",
+    "authStrategy": "basic"
+  }
+}
+```
+
+Без `credentials` — используется аккаунт из `.env`:
+
+```json
+{ "login": "user@yandex.com" }
+```
+
+**`mail.listFolders`** — список папок ящика (INBOX, Sent, Drafts и т.д.):
+
+```json
+{ "login": "user@yandex.com" }
+```
+
+**`mail.search`** — поиск писем. Все поля `criteria` опциональны, соединяются
+через AND. При возврате 0 результатов по текстовым критериям (subject/from/to)
+срабатывает client-side fallback: метаданные всех писем фильтруются локально
+(обход ненадёжного IMAP SEARCH на Яндексе).
+
+```json
+{
+  "login": "user@yandex.com",
+  "criteria": {
+    "subject": "договор",
+    "from": "legal@example.com",
+    "since": "2026-10-01",
+    "before": "2026-10-31",
+    "folder": "INBOX",
+    "direction": "incoming",
+    "unseen": true,
+    "limit": 50
+  }
+}
+```
+
+Поля `criteria`: `subject`, `from`, `to` (string), `since`/`before` (ISO
+`YYYY-MM-DD`), `folder` (string, приоритет над `direction`), `direction`
+(`incoming`\|`outgoing`), `unseen`/`flagged`/`answered` (boolean), `limit`
+(integer, по умолчанию 50), `offset` (integer).
+
+**`mail.fetch`** — чтение письма по UID: текстовое тело + метаданные вложений.
+UID можно получить из `mail.search`.
+
+```json
+{ "login": "user@yandex.com", "uid": 42, "folder": "INBOX" }
+```
+
+**`mail.downloadAttachments`** — скачивание вложений в локальный каталог. Без
+`targetDir` используется `DOWNLOAD_DIR` из конфигурации. Без `names` — все
+вложения.
+
+```json
+{
+  "login": "user@yandex.com",
+  "uid": 42,
+  "targetDir": "/home/user/Загрузки",
+  "names": ["report.pdf"]
+}
+```
+
+**`mail.send`** — отправка письма по SMTP с двухфазным протоколом:
+
+- `confirm: false` → валидация + предпросмотр черновика, **без** SMTP.
+- `confirm: true` → валидация; если валидно — отправка.
+
+```json
+{
+  "login": "user@yandex.com",
+  "mail": {
+    "to": [{ "address": "recipient@example.com", "name": "Имя" }],
+    "subject": "Тема письма",
+    "text": "Текст тела письма"
+  },
+  "confirm": false
+}
+```
+
+Поля `mail`: `to` (array, ≥1, объекты `{ address, name? }`), `cc?`, `bcc?`,
+`subject` (string), `text` (string), `html?` (string), `attachments?` (array,
+`{ path }`), `encoding?` (string).
+
+#### Тулы векторного поиска
+
+| Тул | Назначение | Обязательные параметры |
+|-----|-----------|----------------------|
+| `embeddings.index` | Индексация письма в FalkorDB | `login`, `uid` |
+| `vector.search` | Семантический поиск по смыслу | `query` |
+
+**`embeddings.index`** — индексация письма: строит embedding «тема + тело» и
+сохраняет в FalkorDB. Idempotent (повторный вызов обновляет).
+
+```json
+{ "login": "user@yandex.com", "uid": 42, "folder": "INBOX" }
+```
+
+**`vector.search`** — семантический поиск (без `mail.connect`). Строит embedding
+запроса и возвращает top-k ближайших писем с оценкой.
+
+```json
+{
+  "query": "договор на аренду",
+  "k": 5,
+  "filter": { "login": "user@yandex.com", "folder": "INBOX" }
+}
+```
+
+### Подключение других агентов (MCP-клиентов)
+
+MCP-сервер поддерживает два транспорта. Выбор зависит от того, где работает
+клиент: локально на этой машине — stdio; удалённо или из браузера — HTTP.
+
+#### Способ 1: stdio (локальные клиенты — pi, Claude Desktop)
+
+Клиент сам запускает процесс MCP-сервера и общается через stdin/stdout. Это
+стандартный способ для локальных агентов.
+
+Параметры для конфигурации клиента:
+
+| Параметр | Значение |
+|----------|---------|
+| `command` | `/home/geekonclick/.nvm/versions/node/v22.11.0/bin/npx` |
+| `args` | `["tsx", "src/mcp/index.ts"]` |
+| `cwd` | `/home/geekonclick/Рабочий стол/projects/email-helper` |
+| `env.PATH` | `/home/geekonclick/.nvm/versions/node/v22.11.0/bin:/usr/bin:/bin` |
+
+**pi** — добавить в конфиг (`.pi/config.yaml`):
+
+```yaml
+mcp:
+  - name: email-helper
+    transport: stdio
+    command: /home/geekonclick/.nvm/versions/node/v22.11.0/bin/npx
+    args: ["tsx", "src/mcp/index.ts"]
+    cwd: "/home/geekonclick/Рабочий стол/projects/email-helper"
+```
+
+**Claude Desktop** — файл `claude_desktop_config.json` (macOS:
+`~/Library/Application Support/Claude/`, Linux: `~/.config/Claude/`):
+
+```json
+{
+  "mcpServers": {
+    "email-helper": {
+      "command": "/home/geekonclick/.nvm/versions/node/v22.11.0/bin/npx",
+      "args": ["tsx", "src/mcp/index.ts"],
+      "cwd": "/home/geekonclick/Рабочий стол/projects/email-helper",
+      "env": {
+        "PATH": "/home/geekonclick/.nvm/versions/node/v22.11.0/bin:/usr/bin:/bin"
+      }
+    }
+  }
+}
+```
+
+#### Способ 2: Streamable HTTP (удалённые/веб-клиенты)
+
+Сервер поднимается как процесс, клиент подключается по URL.
+
+URL: `http://127.0.0.1:3000/mcp`
+
+Клиент делает POST-запросы с JSON-RPC 2.0 (Streamable HTTP transport MCP):
+
+```bash
+# Инициализация сессии
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+
+# Список тулов (использовать Mcp-Session-Id из ответа initialize)
+curl -X POST http://127.0.0.1:3000/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <id из initialize>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
+**pi** — установка по URL:
+
+```bash
+mcp install http://127.0.0.1:3000/mcp
+```
+
+#### Предварительные требования
+
+1. **`.env` настроен** — MCP-сервер при старте вызывает `bootstrap()`, который
+   грузит конфигурацию (API-ключи, аккаунты почты, FalkorDB). Без `.env`
+   сервер упадёт с ошибкой в stderr.
+2. **FalkorDB запущен** — для тулов `embeddings.index` / `vector.search`:
+   ```bash
+   docker compose -f docker/docker-compose.yml up -d
+   ```
+3. **`mail.connect` первым** — большинство тулов требуют активной IMAP-сессии.
+   Типичный flow: `mail.connect` → `mail.search` → `mail.fetch`. Внешний агент
+   может передать свои креды в блоке `credentials` тулa `mail.connect`
+   (`provider`, `password`, `authStrategy`) — тогда подключение идёт с ними,
+   а не с аккаунтами из `.env` сервера. Без `credentials` используется
+   `.env`. См. раздел «Инструменты MCP» выше.
+4. **Состояние сессий и очистка кредов** — MCP-сервер stateless по HTTP (новый `Server`+
+   `transport` на запрос), но IMAP-сессии из `mail.connect` живут в общем
+   `MailSessionStore` процесса. В stdio — одна сессия на процесс; в HTTP —
+   общая на все запросы. При завершении сервера (stdio EOF, SIGINT/SIGTERM,
+   закрытие HTTP-stdin) `cleanup()` вызывает `disposeAll()`: закрывает все
+   IMAP-соединения и **обнуляет ссылки на аккаунты с паролями** в провайдерах —
+   динамические креды, переданные через MCP, удаляются из памяти и не
+   сохраняются на диск и не передаются третьим лицам (только на IMAP/SMTP-
+   сервер провайдера для авторизации).
+5. **`delegate` скрыт** — внутренний тул оркестратора не экспонируется.
+
+#### Быстрая проверка
+
+```bash
+cd "/home/geekonclick/Рабочий стол/projects/email-helper"
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | \
+  /home/geekonclick/.nvm/versions/node/v22.11.0/bin/npx tsx src/mcp/index.ts 2>/dev/null
+```
+
+Должен вернуть JSON-RPC ответ с `serverInfo: { name: "email-helper",
+version: "0.1.0" }`.
+
 ## Тесты
 
 ```bash
