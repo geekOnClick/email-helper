@@ -113,9 +113,11 @@ describe('formatCommandHelp', () => {
   it('содержит все slash-команды guided-режима', () => {
     const out = formatCommandHelp(false);
     expect(out).toContain('/find');
+    expect(out).toContain('/find-all');
     expect(out).toContain('/analyze');
     expect(out).toContain('/download');
     expect(out).toContain('/send');
+    expect(out).toContain('/add-account');
     expect(out).toContain('/stats');
     expect(out).toContain('/quit');
   });

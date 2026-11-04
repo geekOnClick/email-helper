@@ -108,6 +108,7 @@ export function formatCommandHelp(useColor = true): string {
   return [
     'Команды:',
     cmd('/find', 'поиск писем по теме/дате/отправителю'),
+    cmd('/find-all', 'поиск всех писем по теме/отправителю и датам'),
     cmd('/analyze', 'найти и проанализировать письмо'),
     cmd('/download', 'найти и скачать вложения письма'),
     cmd('/send', 'отправить письмо с подтверждением'),
@@ -155,4 +156,81 @@ export function formatDraft(draft: DraftEmail, useColor = true): string {
   lines.push(draft.text);
   lines.push(sep);
   return lines.join('\n');
+}
+
+// === Таблица /find-all (change cli-find-all-command) ===
+
+/** Максимум строк в таблице /find-all; сверх — «найдено ещё N писем». */
+const FIND_ALL_MAX_ROWS = 10;
+
+/** Нормализует ячейку таблицы: схлопывает переводы строк/табы в пробел, обрезает края. */
+function normalizeCell(text: string | undefined): string {
+  if (!text) return '';
+  return text.replace(/[\r\n\t]+/g, ' ').trim();
+}
+
+/** Форматирует отправителя как «Name <email>» при наличии имени, иначе email. */
+function formatSender(from: { name?: string; address: string } | undefined): string {
+  const addr = from?.address ?? '';
+  const name = from?.name;
+  if (name && addr) return `${name} <${addr}>`;
+  return addr || 'неизвестно';
+}
+
+/** Дополняет строку пробелами до ширины колонки. */
+function padCell(text: string, width: number): string {
+  return text + ' '.repeat(Math.max(0, width - text.length));
+}
+
+/**
+ * Форматирует результат /find-all таблицей: заголовки «Дата письма | Тема письма |
+ * Отправитель», ниже строки данных (дата + полная тема + отправитель). Ширина
+ * колонок вычисляется по данным (тема — полностью, без усечения). Если строк
+ * больше 10 — выводит первые 10 и строку «найдено ещё N писем». При пустом
+ * массиве возвращает пустую строку (обработчик сам выведет «Ничего не найдено.»).
+ *
+ * Порядок строк — как передан (тул возвращает UID-порядок папки); сортировка не
+ * вводится (Non-Goal change cli-find-all-command).
+ */
+export function formatFindAllTable(messages: EmailMessage[], useColor = true): string {
+  if (messages.length === 0) return '';
+
+  const shown = messages.slice(0, FIND_ALL_MAX_ROWS);
+  const dateStrs = shown.map((m) => formatIsoDate(m.date));
+  const subjStrs = shown.map((m) => normalizeCell(m.subject));
+  const fromStrs = shown.map((m) => formatSender(m.from));
+
+  const HEADER_DATE = 'Дата письма';
+  const HEADER_SUBJECT = 'Тема письма';
+  const HEADER_FROM = 'Отправитель';
+  const SEP = ' | ';
+
+  const wDate = Math.max(HEADER_DATE.length, ...dateStrs.map((s) => s.length));
+  const wSubject = Math.max(HEADER_SUBJECT.length, ...subjStrs.map((s) => s.length));
+  const wFrom = Math.max(HEADER_FROM.length, ...fromStrs.map((s) => s.length));
+
+  const totalWidth = wDate + wSubject + wFrom + SEP.length * 2;
+  const border = color('─'.repeat(totalWidth), ANSI.dim, useColor);
+
+  const lines: string[] = [`Найдено писем: ${messages.length}`, border];
+  lines.push(`${padCell(HEADER_DATE, wDate)}${SEP}${padCell(HEADER_SUBJECT, wSubject)}${SEP}${padCell(HEADER_FROM, wFrom)}`);
+  lines.push(border);
+  for (let i = 0; i < shown.length; i++) {
+    lines.push(`${padCell(dateStrs[i] ?? '', wDate)}${SEP}${padCell(subjStrs[i] ?? '', wSubject)}${SEP}${padCell(fromStrs[i] ?? '', wFrom)}`);
+  }
+  lines.push(border);
+
+  const rest = messages.length - shown.length;
+  if (rest > 0) {
+    lines.push(`найдено ещё ${rest} писем`);
+  }
+  return lines.join('\n');
+}
+
+/** Форматирует Date как `YYYY-MM-DD` (по локальным компонентам даты). */
+function formatIsoDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }

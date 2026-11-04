@@ -13,6 +13,7 @@ import { formatCommandHelp, formatError, formatSessionReport } from './format.js
 import { SessionStats } from '../../observability/session-stats.js';
 import {
   runFindCommand,
+  runFindAllCommand,
   runAnalyzeCommand,
   runDownloadCommand,
   runSendCommand,
@@ -138,6 +139,11 @@ export class CliRepl {
       case '/find':
         await this.runSafe(() =>
           runFindCommand({ io: this.io, accounts: this.registry.list() }),
+        );
+        return false;
+      case '/find-all':
+        await this.runSafe(() =>
+          runFindAllCommand({ io: this.io, accounts: this.registry.list() }),
         );
         return false;
       case '/analyze':
