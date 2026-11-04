@@ -112,14 +112,17 @@ describe('formatError', () => {
 describe('formatCommandHelp', () => {
   it('содержит все slash-команды guided-режима', () => {
     const out = formatCommandHelp(false);
-    expect(out).toContain('/find');
-    expect(out).toContain('/find-all');
     expect(out).toContain('/analyze');
-    expect(out).toContain('/download');
-    expect(out).toContain('/send');
+    expect(out).toContain('/analyze-many');
+    expect(out).toContain('/analyze-attachments');
+    expect(out).toContain('/smart-send');
     expect(out).toContain('/add-account');
     expect(out).toContain('/stats');
     expect(out).toContain('/quit');
+    // убранные команды больше не упоминаются
+    expect(out).not.toContain('/find');
+    expect(out).not.toContain('/download');
+    expect(out).not.toContain('/send');
   });
 
   it('упоминает slash-командный режим', () => {

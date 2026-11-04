@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { resetTools, type ToolDef } from '../src/tools/registry.js';
-import { collectAllMessages } from '../src/transport/cli/commands/find-all.js';
+import { collectAllMessages } from '../src/transport/cli/commands/search-aggregator.js';
 import type { SearchResult, EmailMessage } from '../src/types/email.js';
 
 /** Строит EmailMessage с заданной датой/темой/отправителем. */

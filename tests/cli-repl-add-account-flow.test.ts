@@ -7,6 +7,8 @@ import { MockConsoleIO } from './mock-io.js';
 import { AccountRegistry } from '../src/config/account-registry.js';
 import { resetTools, registerTool, type ToolDef } from '../src/tools/registry.js';
 import { parseAccounts } from '../src/config/loader.js';
+import type { RouterAiClient } from '../src/llm/routerai-client.js';
+import type { ChatRequest, ChatResult } from '../src/llm/types.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
 import type { Subagent } from '../src/agents/subagent.js';
 
@@ -35,6 +37,16 @@ function stubAnalyzer(): Subagent {
   return { name: 'analyzer', description: 'stub', run: async () => 'саммари' };
 }
 
+/** Стаб RouterAiClient для /smart-send. */
+function stubLlmClient(): RouterAiClient {
+  return {
+    chat: async (_request: ChatRequest): Promise<ChatResult> => ({
+      content: 'тело',
+      toolCalls: [],
+    }),
+  } as unknown as RouterAiClient;
+}
+
 /** Stub mail.search тул, который просто возвращает пустой результат — нужен, чтобы
  * /find не падал на «тул не зарегистрирован» и доходил до promptAccount. */
 function stubSearchTool(): ToolDef {
@@ -56,8 +68,8 @@ function stubConnectTool(): ToolDef {
   };
 }
 
-describe('CliRepl: аккаунт, добавленный /add-account, виден в /find', () => {
-  it('после /add-account новый аккаунт появляется в выборе /find', async () => {
+describe('CliRepl: аккаунт, добавленный /add-account, виден в /analyze', () => {
+  it('после /add-account новый аккаунт появляется в выборе /analyze', async () => {
     await writeFile(envPath(), 'ROUTERAI_API_KEY=key\n', 'utf8');
     registerTool(stubSearchTool());
     registerTool(stubConnectTool());
@@ -71,9 +83,9 @@ describe('CliRepl: аккаунт, добавленный /add-account, виде
       'login - new@yandex.com',
       'password - fresh-pwd',
       '', // завершить мастер
-      // /find: выбираем заведённый аккаунт (он единственный → авто-выбор),
+      // /analyze: выбираем заведённый аккаунт (он единственный → авто-выбор),
       // затем пустые критерии → отмена.
-      '/find',
+      '/analyze',
       '', // пустая строка в мастере критериев → отмена (0 полей)
       '/quit',
     ]);
@@ -83,7 +95,7 @@ describe('CliRepl: аккаунт, добавленный /add-account, виде
       registry,
       envPath: envPath(),
       analyzer,
-      downloadDir: '/tmp',
+      llmClient: stubLlmClient(),
     });
 
     await repl.start();
@@ -105,9 +117,15 @@ describe('CliRepl: аккаунт, добавленный /add-account, виде
     expect(io.output()).toContain('✓ Аккаунт сохранён');
   });
 
-  it('/find с одним аккаунтом в реестре → авто-выбор без запроса', async () => {
+  it('/analyze с одним аккаунтом в реестре → авто-выбор без запроса', async () => {
     registerTool(stubSearchTool());
     registerTool(stubConnectTool());
+    registerTool({
+      name: 'mail.fetch',
+      description: 'stub',
+      inputSchema: { type: 'object' },
+      handler: async () => ({}),
+    });
     const account: MailAccount = {
       provider: 'yandex',
       login: 'solo@yandex.com',
@@ -117,7 +135,7 @@ describe('CliRepl: аккаунт, добавленный /add-account, виде
     const registry = new AccountRegistry([account]);
     const analyzer = stubAnalyzer();
     const io = new MockConsoleIO([
-      '/find',
+      '/analyze',
       'тема - тест',
       '', // завершить сбор критериев
       '/quit',
@@ -128,13 +146,13 @@ describe('CliRepl: аккаунт, добавленный /add-account, виде
       registry,
       envPath: envPath(),
       analyzer,
-      downloadDir: '/tmp',
+      llmClient: stubLlmClient(),
     });
 
     await repl.start();
     // Поиск выполнен (auto-выбор аккаунта, без запроса номера).
     expect(io.output()).not.toContain('Выберите аккаунт');
-    // Либо найдено 0, либо список — stub возвращает пусто → «Ничего не найдено».
+    // Stub search возвращает пусто → «Ничего не найдено».
     expect(io.output()).toContain('Ничего не найдено');
   });
 });

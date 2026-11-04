@@ -3,7 +3,6 @@ import {
   parseCriteriaLine,
   validateValue,
   promptSearchCriteria,
-  promptSendCriteria,
   promptAccount,
   promptUid,
   promptConfirm,
@@ -132,39 +131,6 @@ describe('promptSearchCriteria', () => {
     const result = await promptSearchCriteria(io);
     expect(result).toEqual({ subject: 'а' });
     expect(io.output()).toContain('уже введено');
-  });
-});
-
-describe('promptSendCriteria', () => {
-  it('полный сбор тема/текст/получатель', async () => {
-    const io = new MockConsoleIO([
-      'тема - ответ',
-      'текст - тело письма',
-      'получатель - dest@example.com',
-      '',
-    ]);
-    const result = await promptSendCriteria(io);
-    expect(result).toEqual({
-      subject: 'ответ',
-      text: 'тело письма',
-      to: 'dest@example.com',
-    });
-  });
-  it('неполный набор (нет получателя) → null', async () => {
-    const io = new MockConsoleIO(['тема - ответ', 'текст - тело', '']);
-    const result = await promptSendCriteria(io);
-    expect(result).toBeNull();
-  });
-  it('невалидный email получателя → повтор', async () => {
-    const io = new MockConsoleIO([
-      'тема - ответ',
-      'текст - тело',
-      'получатель - bad',
-      'получатель - ok@example.com',
-      '',
-    ]);
-    const result = await promptSendCriteria(io);
-    expect(result?.to).toBe('ok@example.com');
   });
 });
 

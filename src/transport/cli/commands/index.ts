@@ -1,7 +1,12 @@
 /** Обработчики guided-команд (change guided-commands). */
-export { runFindCommand, type FindCommandDeps } from './find.js';
-export { runFindAllCommand, type FindAllCommandDeps } from './find-all.js';
 export { runAnalyzeCommand, type AnalyzeCommandDeps } from './analyze.js';
-export { runDownloadCommand, type DownloadCommandDeps, getDefaultDownloadDir } from './download.js';
-export { runSendCommand, type SendCommandDeps } from './send.js';
+export { runAnalyzeManyCommand, type AnalyzeManyCommandDeps } from './analyze-many.js';
+export { runAnalyzeAttachmentsCommand, type AnalyzeAttachmentsCommandDeps } from './analyze-attachments.js';
+export { runSmartSendCommand, type SmartSendCommandDeps } from './smart-send.js';
 export { ensureMailConnected } from './connect.js';
+// shared-утилита批量-поиска (переиспользуется /analyze-many и тестами).
+export {
+  collectAllMessages,
+  type CollectAllMessagesResult,
+  type CollectAllMessagesOptions,
+} from './search-aggregator.js';

@@ -57,6 +57,10 @@ export const ConfigSchema = z.object({
   MAIL_OP_MAX_RETRIES: z.coerce.number().int().nonnegative().default(1),
   // SINCE по умолчанию (в днях) для subject-only поиска — bounded client-side фолбэкк.
   MAIL_SEARCH_FALLBACK_DAYS: z.coerce.number().int().positive().default(180),
+  // === Команды CLI (cli-smart-commands) ===
+  // Потолок числа писем для /analyze-many (фетч тел + анализ). При превышении —
+  // анализ первых N с предупреждением об усечении.
+  ANALYZE_MANY_MAX_EMAILS: z.coerce.number().int().positive().default(10),
 
   // === Microsoft identity (OAuth2 для Outlook, Phase 1) ===
   // Public client (без секрета), tenant 'consumers' для личных @outlook.com

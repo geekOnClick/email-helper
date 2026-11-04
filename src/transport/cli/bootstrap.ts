@@ -50,6 +50,10 @@ export interface BootstrapResult {
   downloadDir: string;
   /** Окно bounded-поиска (дней) для /find без явной даты (MAIL_SEARCH_FALLBACK_DAYS). */
   fallbackDays: number;
+  /** Потолок числа писем для /analyze-many (ANALYZE_MANY_MAX_EMAILS). */
+  analyzeManyMaxEmails: number;
+  /** LLM-клиент для /smart-send (прямой one-shot completion, роль helper). */
+  llmClient: RouterAiClient;
   /** Статистика сессии для REPL (питается toolLogger агента). */
   stats: SessionStats;
   /** Освобождает занятые ресурсы (mail-сессии, FalkorDB). */
@@ -157,5 +161,5 @@ async function buildAgent(
     if (falkorClient) await falkorClient.close();
   };
 
-  return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, fallbackDays: config.MAIL_SEARCH_FALLBACK_DAYS, stats, cleanup };
+  return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, fallbackDays: config.MAIL_SEARCH_FALLBACK_DAYS, analyzeManyMaxEmails: config.ANALYZE_MANY_MAX_EMAILS, llmClient: client, stats, cleanup };
 }

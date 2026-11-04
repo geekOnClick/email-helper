@@ -3,6 +3,8 @@ import { CliRepl } from '../src/transport/cli/repl.js';
 import { MockConsoleIO } from './mock-io.js';
 import { resetTools } from '../src/tools/registry.js';
 import { AccountRegistry } from '../src/config/account-registry.js';
+import type { RouterAiClient } from '../src/llm/routerai-client.js';
+import type { ChatRequest, ChatResult } from '../src/llm/types.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
 import type { Subagent } from '../src/agents/subagent.js';
 
@@ -21,6 +23,16 @@ function stubAnalyzer(): Subagent {
   };
 }
 
+/** Стаб RouterAiClient для /smart-send (one-shot chat, роль helper). */
+function stubLlmClient(): RouterAiClient {
+  return {
+    chat: async (_request: ChatRequest): Promise<ChatResult> => ({
+      content: 'Сгенерированное тело письма.',
+      toolCalls: [],
+    }),
+  } as unknown as RouterAiClient;
+}
+
 /** Создаёт REPL со стаб-зависимостями guided-команд. */
 function makeRepl(inputs: string[], accounts: MailAccount[] = [ACCOUNT]) {
   const io = new MockConsoleIO(inputs);
@@ -31,7 +43,7 @@ function makeRepl(inputs: string[], accounts: MailAccount[] = [ACCOUNT]) {
     registry: new AccountRegistry(accounts),
     envPath: '.env.test-not-written',
     analyzer,
-    downloadDir: '/tmp',
+    llmClient: stubLlmClient(),
   });
   return { io, repl, analyzer };
 }
@@ -45,7 +57,7 @@ describe('CliRepl: guided-режим', () => {
       await repl.start();
       const out = io.output();
       expect(out).toContain('только slash-командный режим');
-      expect(out).toContain('/find');
+      expect(out).toContain('/analyze');
     });
 
     it('пустой ввод игнорируется', async () => {
@@ -73,7 +85,7 @@ describe('CliRepl: guided-режим', () => {
       await repl.start();
       const out = io.output();
       expect(out).toContain('Неизвестная команда');
-      expect(out).toContain('/find');
+      expect(out).toContain('/analyze');
       expect(out).toContain('/add-account');
     });
   });
@@ -104,10 +116,10 @@ describe('CliRepl: guided-режим', () => {
       const { io, repl } = makeRepl(['/quit']);
       await repl.start();
       const out = io.output();
-      expect(out).toContain('/find');
       expect(out).toContain('/analyze');
-      expect(out).toContain('/download');
-      expect(out).toContain('/send');
+      expect(out).toContain('/analyze-many');
+      expect(out).toContain('/analyze-attachments');
+      expect(out).toContain('/smart-send');
       expect(out).toContain('/stats');
       expect(out).toContain('/add-account');
     });

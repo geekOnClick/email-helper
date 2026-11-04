@@ -151,102 +151,6 @@ function applySearchField(result: SearchCriteriaInput, field: SearchField, value
   }
 }
 
-/** Поля мастера отправки (тема/текст/получатель — обязательны). */
-const SEND_FIELDS = ['тема', 'текст', 'получатель'] as const;
-type SendField = (typeof SEND_FIELDS)[number];
-
-/**
- * Собирает критерии письма для отправки (тема, текст, получатель).
- * Все поля обязательны. Формат тот же: `ключ - значение`.
- */
-export async function promptSendCriteria(io: ConsoleIO): Promise<SendCriteriaInput | null> {
-  const subject: string[] = [];
-  const text: string[] = [];
-  const to: string[] = [];
-  const seen = new Set<SendField>();
-  io.write('Введите данные письма (по одному полю на строку в формате «тема - текст»):\n');
-  io.write('Обязательные поля: тема, текст, получатель (email). Пустая строка — завершить.\n');
-
-  while (true) {
-    io.write('> ');
-    const line = await io.readline();
-    if (line === null) {
-      return finalizeSend(subject, text, to);
-    }
-    if (line.trim() === '') {
-      return finalizeSend(subject, text, to);
-    }
-    const parsed = parseSendLine(line);
-    if (!parsed) {
-      io.write('Неверный формат. Используйте «ключ - значение» (напр. «тема - ответ на договор»).\n');
-      continue;
-    }
-    if (seen.has(parsed.field)) {
-      io.write(`Поле «${parsed.field}» уже введено. Пустая строка — завершить.\n`);
-      continue;
-    }
-    const err = validateSendValue(parsed.field, parsed.value);
-    if (err) {
-      io.write(`${err}\n`);
-      continue;
-    }
-    seen.add(parsed.field);
-    pushSendValue(parsed.field, parsed.value, subject, text, to);
-    io.write(`✓ ${parsed.field}\n`);
-  }
-}
-
-/** Парсит строку мастера отправки. */
-function parseSendLine(line: string): { field: SendField; value: string } | null {
-  const trimmed = line.trim();
-  if (trimmed === '') return null;
-  const sepIdx = trimmed.indexOf(SEPARATOR);
-  if (sepIdx === -1) return null;
-  const field = trimmed.slice(0, sepIdx).trim().toLowerCase();
-  const value = trimmed.slice(sepIdx + SEPARATOR.length).trim();
-  if (value === '') return null;
-  if (!SEND_FIELDS.includes(field as SendField)) return null;
-  return { field: field as SendField, value };
-}
-
-/** Валидирует значение поля отправки. */
-function validateSendValue(field: SendField, value: string): string | null {
-  switch (field) {
-    case 'тема':
-      return value.length > 0 ? null : 'тема не должна быть пустой';
-    case 'текст':
-      return value.length > 0 ? null : 'текст не должен быть пустым';
-    case 'получатель':
-      return isValidEmail(value) ? null : `некорректный email: ${value}`;
-  }
-}
-
-/** Записывает значение в соответствующий аккумулятор. */
-function pushSendValue(field: SendField, value: string, subject: string[], text: string[], to: string[]): void {
-  switch (field) {
-    case 'тема':
-      subject.push(value);
-      break;
-    case 'текст':
-      text.push(value);
-      break;
-    case 'получатель':
-      to.push(value);
-      break;
-  }
-}
-
-/** Финализирует SendCriteriaInput или возвращает null при неполном наборе. */
-function finalizeSend(subject: string[], text: string[], to: string[]): SendCriteriaInput | null {
-  const s = subject[0];
-  const t = text[0];
-  const r = to[0];
-  if (!s || !t || !r) {
-    return null;
-  }
-  return { subject: s, text: t, to: r };
-}
-
 /**
  * Запрашивает выбор почтового аккаунта.
  * - 0 аккаунтов → null + сообщение.
@@ -314,6 +218,146 @@ export async function promptConfirm(io: ConsoleIO, question: string): Promise<bo
   if (line === null) return false;
   const answer = line.trim().toLowerCase();
   return answer === 'да' || answer === 'yes' || answer === 'y' || answer === 'д';
+}
+
+// === Мастер /smart-send (change cli-smart-commands) ===
+
+/** Входные критерии /smart-send: тема, получатель, промпт для генерации тела. */
+export interface SmartSendCriteriaInput {
+  /** Тема письма (обязательна). */
+  subject: string;
+  /** Получатель (email, обязателен). */
+  to: string;
+  /** Произвольный промпт для генерации тела письма (обязателен). */
+  prompt: string;
+}
+
+/** Поля мастера /smart-send. */
+const SMART_SEND_FIELDS = ['тема', 'получатель', 'промпт'] as const;
+type SmartSendField = (typeof SMART_SEND_FIELDS)[number];
+
+/** Парсит строку мастера /smart-send. */
+export function parseSmartSendLine(line: string): { field: SmartSendField; value: string } | null {
+  const trimmed = line.trim();
+  if (trimmed === '') return null;
+  const sepIdx = trimmed.indexOf(SEPARATOR);
+  if (sepIdx === -1) return null;
+  const field = trimmed.slice(0, sepIdx).trim().toLowerCase();
+  const value = trimmed.slice(sepIdx + SEPARATOR.length).trim();
+  if (value === '') return null;
+  if (!SMART_SEND_FIELDS.includes(field as SmartSendField)) return null;
+  return { field: field as SmartSendField, value };
+}
+
+/** Валидирует значение поля /smart-send. Возвращает null или сообщение об ошибке. */
+export function validateSmartSendValue(field: SmartSendField, value: string): string | null {
+  switch (field) {
+    case 'тема':
+      return value.length > 0 ? null : 'тема не должна быть пустой';
+    case 'получатель':
+      return isValidEmail(value) ? null : `некорректный email: ${value}`;
+    case 'промпт':
+      return value.length > 0 ? null : 'промпт не должен быть пустым';
+  }
+}
+
+/** Применяет поле к критериям /smart-send. */
+function applySmartSendField(result: Partial<Record<SmartSendField, string>>, field: SmartSendField, value: string): void {
+  switch (field) {
+    case 'тема':
+      result['тема'] = value;
+      break;
+    case 'получатель':
+      result['получатель'] = value;
+      break;
+    case 'промпт':
+      result['промпт'] = value;
+      break;
+  }
+}
+
+/**
+ * Собирает критерии /smart-send в интерактивном мастере.
+ *
+ * Поля вводятся построчно в формате `ключ - значение` (как другие guided-команды).
+ * Обязательные: тема, получатель (email), промпт (произвольный текст). Пустая
+ * строка завершает сбор: все поля → генерация, иначе отмена.
+ */
+export async function promptSmartSendCriteria(io: ConsoleIO): Promise<SmartSendCriteriaInput | null> {
+  const fields: Partial<Record<SmartSendField, string>> = {};
+  const seen = new Set<SmartSendField>();
+  io.write('Введите данные письма (по одному полю на строку в формате «ключ - значение»):\n');
+  io.write('Обязательные поля: тема, получатель (email), промпт (инструкция для генерации тела). Пустая строка — завершить.\n');
+
+  while (true) {
+    io.write('> ');
+    const line = await io.readline();
+    if (line === null || line.trim() === '') return finalizeSmartSend(fields);
+
+    const parsed = parseSmartSendLine(line);
+    if (!parsed) {
+      io.write('Неверный формат. Используйте «ключ - значение» (напр. «тема - ответ на договор»).\n');
+      continue;
+    }
+    if (seen.has(parsed.field)) {
+      io.write(`Поле «${parsed.field}» уже введено. Пустая строка — завершить.\n`);
+      continue;
+    }
+    const err = validateSmartSendValue(parsed.field, parsed.value);
+    if (err) {
+      io.write(`${err}\n`);
+      continue;
+    }
+    seen.add(parsed.field);
+    applySmartSendField(fields, parsed.field, parsed.value);
+    io.write(`✓ ${parsed.field}\n`);
+  }
+}
+
+/** Финализирует SmartSendCriteriaInput или возвращает null при неполном наборе. */
+function finalizeSmartSend(fields: Partial<Record<SmartSendField, string>>): SmartSendCriteriaInput | null {
+  const subject = fields['тема'];
+  const to = fields['получатель'];
+  const prompt = fields['промпт'];
+  if (!subject || !to || !prompt) {
+    return null;
+  }
+  return { subject, to, prompt };
+}
+
+/** Действие пользователя в цикле подтверждения/правки /smart-send. */
+export type SendAction =
+  | { action: 'send' }
+  | { action: 'cancel' }
+  | { action: 'redo'; feedback: string };
+
+/** Ключевые слова-действия (нижний регистр). */
+const ACTION_SEND = ['отправить', 'да', 'yes', 'y', 'д'];
+const ACTION_CANCEL = ['отмена', 'нет', 'no', 'n', 'cancel'];
+
+/**
+ * Запрашивает действие после показа черновика /smart-send.
+ *
+ * - `отправить`/`да` → { action: 'send' }
+ * - `отмена`/`нет` → { action: 'cancel' }
+ * - любой непустой текст (не совпавший с отправить/отмена) → { action: 'redo', feedback }
+ * - пустой ввод → повтор запроса (EOF → cancel)
+ */
+export async function promptSendAction(io: ConsoleIO): Promise<SendAction> {
+  io.write('Действие: «отправить» / «отмена» / либо введите промпт-правку для перегенерации тела:\n> ');
+  while (true) {
+    const line = await io.readline();
+    if (line === null) return { action: 'cancel' };
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      io.write('Введите «отправить», «отмена» или промпт-правку:\n> ');
+      continue;
+    }
+    const lower = trimmed.toLowerCase();
+    if (ACTION_SEND.includes(lower)) return { action: 'send' };
+    if (ACTION_CANCEL.includes(lower)) return { action: 'cancel' };
+    return { action: 'redo', feedback: trimmed };
+  }
 }
 
 // === Мастер заведения аккаунта /add-account (change mcp-env-account-credentials) ===

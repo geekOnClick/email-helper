@@ -88,7 +88,7 @@ describe('CliRepl: интеграция /analyze с composeAgents', () => {
       '',
       '/quit',
     ]);
-    const repl = new CliRepl({ io, accounts, registry, envPath: '.env.test', analyzer, downloadDir: '/tmp' });
+    const repl = new CliRepl({ io, accounts, registry, envPath: '.env.test', analyzer, llmClient: scriptedClient() });
     const exit = await repl.start();
     const out = io.output();
 
@@ -100,7 +100,7 @@ describe('CliRepl: интеграция /analyze с composeAgents', () => {
   it('EOF завершает интеграционную сессию', async () => {
     const { analyzer, accounts, registry } = await composeAgentWithAnalyzer();
     const io = new MockConsoleIO([]);
-    const repl = new CliRepl({ io, accounts, registry, envPath: '.env.test', analyzer, downloadDir: '/tmp' });
+    const repl = new CliRepl({ io, accounts, registry, envPath: '.env.test', analyzer, llmClient: scriptedClient() });
     const exit = await repl.start();
     expect(exit.reason).toBe('eof');
   });
