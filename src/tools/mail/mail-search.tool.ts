@@ -1,7 +1,7 @@
 import type { ToolDef } from '../registry.js';
 import { MailSessionStore } from './session-store.js';
 import { ConnectError } from './providers/abstract-imap-provider.js';
-import type { SearchCriteria, SearchResult } from '../../types/email.js';
+import type { SearchCriteria, SearchResult, MailOpOptions } from '../../types/email.js';
 
 export interface MailSearchArgs {
   login: string;
@@ -10,6 +10,8 @@ export interface MailSearchArgs {
 
 export interface MailSearchDeps {
   sessionStore: MailSessionStore;
+  /** Опции устойчивости (timeout/retry) — change mail-search-robustness. */
+  mailOpOptions?: MailOpOptions;
 }
 
 /**
@@ -62,7 +64,7 @@ export function createMailSearchTool(deps: MailSearchDeps): ToolDef<MailSearchAr
 
       // парсинг ISO-дат в Date
       const criteria = normalizeCriteria(args.criteria);
-      return await provider.search(criteria);
+      return await provider.search(criteria, deps.mailOpOptions);
     },
   };
 }

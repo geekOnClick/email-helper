@@ -17,7 +17,7 @@ import type {
   MailAccount,
   MailProviderKind,
 } from '../types.js';
-import type { SearchCriteria, SearchResult, EmailMessage, EmailAddress, EmailFull, DownloadResult } from '../../../types/email.js';
+import type { SearchCriteria, SearchResult, EmailMessage, EmailAddress, EmailFull, DownloadResult, MailOpOptions } from '../../../types/email.js';
 
 /** Фабрика IMAP-клиента. По умолчанию ImapFlow; в тестах подменяется. */
 export type ImapClientFactory = (options: ImapFlowOptions) => ImapClient;
@@ -90,7 +90,13 @@ export abstract class AbstractImapProvider implements MailProvider {
     return { connected: true, accountId: this.accountId(), provider: this.providerKind };
   }
 
-  async listFolders(): Promise<Folder[]> {
+  async listFolders(options?: Partial<MailOpOptions>): Promise<Folder[]> {
+    const opts = this.resolveOpOptions(options);
+    return this.runWithTimeoutAndRetry(() => this.listFoldersAttempt(), opts);
+  }
+
+  /** Тело listFolders без таймаута/retry (вызывается через runWithTimeoutAndRetry). */
+  protected async listFoldersAttempt(): Promise<Folder[]> {
     const client = this.requireClient();
     const list = await client.list();
     return list.map((r: ListResponse) => {
@@ -104,26 +110,37 @@ export abstract class AbstractImapProvider implements MailProvider {
     });
   }
 
-  async search(criteria: SearchCriteria): Promise<SearchResult> {
+  async search(criteria: SearchCriteria, options?: Partial<MailOpOptions>): Promise<SearchResult> {
+    const opts = this.resolveOpOptions(options);
+    return this.runWithTimeoutAndRetry(() => this.searchAttempt(criteria, opts), opts);
+  }
+
+  /** Тело поиска без таймаута/retry (вызывается через runWithTimeoutAndRetry). */
+  protected async searchAttempt(
+    criteria: SearchCriteria,
+    opts: MailOpOptions,
+  ): Promise<SearchResult> {
     const client = this.requireClient();
     const account = this.requireAccount();
     try {
       // 1. разрешаем папку (явная / direction / по умолчанию incoming)
-      const folders = await this.listFolders();
+      const folders = await this.listFoldersAttempt();
       const folderPath = resolveFolder(criteria, folders);
       await client.mailboxOpen(folderPath, { readOnly: true });
 
-      // 2. строим SearchObject из критериев (AND по умолчанию)
+      // 2. серверный поиск по полному query (включая subject).
       const query = this.buildSearchObject(criteria);
       const uids = await client.search(query, { uid: true });
 
-      // 2b. Client-side fallback: некоторые IMAP-серверы (Яндекс) ненадёжно
-      // ищут по SUBJECT/FROM/BODY с кириллицей/литералами — SEARCH возвращает 0
-      // даже при совпадении. Если серверный search по текстовым критериям
-      // ничего не нашёл, делаем fetchAll метаданных и фильтруем локально.
+      // 2b. Client-side fallback: серверный SEARCH Яндекса по длинным кириллическим
+      // SUBJECT-литералам ненадёжен (возвращает 0 даже при совпадении). Если серверный
+      // поиск по текстовому критерию пуст — сужаем надёжными критериями (since/before/
+      // from/to/флаги) или SINCE по умолчанию, и фетчим метаданные только по суженному
+      // набору (не по всей папке). См. design D1.
       let effectiveUids = uids;
       if (effectiveUids.length === 0 && this.hasTextCriteria(criteria)) {
-        effectiveUids = await this.clientSideSearch(client, criteria);
+        const narrowedQuery = this.buildNarrowedQuery(criteria, opts.fallbackDays);
+        effectiveUids = await client.search(narrowedQuery, { uid: true });
       }
       const total = effectiveUids.length;
 
@@ -147,7 +164,11 @@ export abstract class AbstractImapProvider implements MailProvider {
         size: true,
       };
       const rows = await client.fetchAll(range, fetchQuery, { uid: true });
-      const messages = rows.map((r: FetchMessageObject) => toEmailMessage(r, folderPath));
+      // D2: ВСЕГДА дофильтровываем серверный результат локально — сервер может
+      // применить только часть текстовых критериев (напр. только SINCE).
+      const messages = rows
+        .map((r: FetchMessageObject) => toEmailMessage(r, folderPath))
+        .filter((m) => this.matchesCriteria(m, criteria));
 
       return { messages, total, hasMore };
     } catch (err) {
@@ -176,30 +197,26 @@ export abstract class AbstractImapProvider implements MailProvider {
   }
 
   /**
-   * Client-side fallback: fetch всех метаданных и фильтрация по текстовым
-   * критериям локально. Используется когда серверный SEARCH (Яндекс)
-   * ненадёжно ищет по SUBJECT/FROM/TO с кириллицей или литералами.
-   *
-   * Возвращает UID'ы совпадающих писем. Доп. флаги (unseen/flagged/answered)
-   * и даты (since/before) также применяются локально.
+   * Суженный серверный запрос для fallback (design D1): берёт надёжные критерии
+   * (since/before/from/to/флаги) без subject. Если надёжных нет — добавляет
+   * SINCE = now - fallbackDays, чтобы не фетчить весь ящик.
    */
-  protected async clientSideSearch(client: ImapClient, criteria: SearchCriteria): Promise<number[]> {
-    const fetchQuery: FetchQueryObject = {
-      uid: true,
-      envelope: true,
-      internalDate: true,
-      flags: true,
-      size: true,
-    };
-    const rows = await client.fetchAll('1:*', fetchQuery, { uid: true });
-    const matched: number[] = [];
-    for (const row of rows) {
-      const msg = toEmailMessage(row, '');
-      if (!this.matchesCriteria(msg, criteria)) continue;
-      matched.push(msg.uid);
+  protected buildNarrowedQuery(criteria: SearchCriteria, fallbackDays: number): SearchObject {
+    const q: SearchObject = {};
+    if (criteria.from) q.from = criteria.from;
+    if (criteria.to) q.to = criteria.to;
+    if (criteria.since) q.since = new Date(criteria.since);
+    if (criteria.before) q.before = new Date(criteria.before);
+    if (criteria.unseen === true) q.seen = false;
+    if (criteria.flagged === true) q.flagged = true;
+    if (criteria.answered === true) q.answered = true;
+    // нет надёжных критериев → SINCE по умолчанию (bounded fallback)
+    if (!q.from && !q.to && !q.since && !q.before && q.seen === undefined && q.flagged === undefined && q.answered === undefined) {
+      const since = new Date();
+      since.setDate(since.getDate() - fallbackDays);
+      q.since = since;
     }
-    // UID'ы возвращаются fetchAll в порядке возрастания, но гарантируем сортировку.
-    return matched.sort((a, b) => a - b);
+    return q;
   }
 
   /** Проверка письма против всех критериев (локальный AND). */
@@ -238,7 +255,17 @@ export abstract class AbstractImapProvider implements MailProvider {
     return true;
   }
 
-  async fetch(uid: number, folder?: string): Promise<EmailFull> {
+  async fetch(
+    uid: number,
+    folder?: string,
+    options?: Partial<MailOpOptions>,
+  ): Promise<EmailFull> {
+    const opts = this.resolveOpOptions(options);
+    return this.runWithTimeoutAndRetry(() => this.fetchAttempt(uid, folder), opts);
+  }
+
+  /** Тело fetch без таймаута/retry. */
+  protected async fetchAttempt(uid: number, folder?: string): Promise<EmailFull> {
     const client = this.requireClient();
     const account = this.requireAccount();
     try {
@@ -276,6 +303,16 @@ export abstract class AbstractImapProvider implements MailProvider {
   }
 
   async downloadAttachments(
+    uid: number,
+    targetDir: string,
+    options?: { folder?: string; names?: string[] } & Partial<MailOpOptions>,
+  ): Promise<DownloadResult> {
+    const opts = this.resolveOpOptions(options);
+    return this.runWithTimeoutAndRetry(() => this.downloadAttempt(uid, targetDir, options), opts);
+  }
+
+  /** Тело downloadAttachments без таймаута/retry. */
+  protected async downloadAttempt(
     uid: number,
     targetDir: string,
     options?: { folder?: string; names?: string[] },
@@ -336,8 +373,130 @@ export abstract class AbstractImapProvider implements MailProvider {
   /** Разрешение папки для fetch/download (folder или direction по умолчанию). */
   protected async resolveFolderForOp(folder: string | undefined, direction: 'incoming' | 'outgoing'): Promise<string> {
     if (folder) return folder;
-    const folders = await this.listFolders();
+    // Вызываем attempt без обёртки timeout/retry — операция-родитель уже обёрнута.
+    const folders = await this.listFoldersAttempt();
     return resolveFolder({ direction }, folders);
+  }
+
+  // === Устойчивость IMAP-операций (change mail-search-robustness) ===
+
+  /** Дефолты опций устойчивости (для прямых вызовов без явных options). */
+  protected resolveOpOptions(options?: Partial<MailOpOptions>): MailOpOptions {
+    return {
+      timeoutMs: options?.timeoutMs ?? 30000,
+      maxRetries: options?.maxRetries ?? 1,
+      fallbackDays: options?.fallbackDays ?? 180,
+    };
+  }
+
+  /**
+   * Классифицирует ошибку как сетевой обрыв (для retry с переподключением).
+   * «подключение не установлено» (нет сессии изначально) НЕ считается connection-
+   * ошибкой — retry через reconnect не поможет, если connect не вызывался.
+   */
+  protected isConnectionError(err: unknown): boolean {
+    if (err instanceof ConnectError) {
+      const msg = err.message.toLowerCase();
+      if (msg.includes('подключение не установлено')) return false;
+      // ошибки аутентификации — не connection (retry не поможет)
+      if (msg.includes('auth') && msg.includes('fail')) return false;
+      // «письмо N не найдено» — логическая ошибка, не сеть
+      if (msg.includes('не найдено')) return false;
+    }
+    const msg = String((err as { message?: string })?.message ?? err).toLowerCase();
+    if (msg.includes('timeout') || msg.includes('превышен таймаут')) return true;
+    return [
+      'connection not available',
+      'econnreset',
+      'enotfound',
+      'etimedout',
+      'socket hang up',
+      'imap connection',
+      'connection closed',
+      'read econnreset',
+      'getaddrinfo enotfound',
+      'connection terminated',
+      'stream destroyed',
+    ].some((s) => msg.includes(s));
+  }
+
+  /**
+   * Мягкий reconnect для retry: закрывает старый client (logout) и открывает новый
+   * через tryConnect, НЕ обнуляя this.account (design D3). После reconnect
+   * операция повторяется.
+   */
+  protected async reconnect(): Promise<void> {
+    const oldClient = this.client;
+    this.client = null;
+    if (oldClient) {
+      try {
+        await oldClient.logout();
+      } catch {
+        // старое соединение уже мертво — освобождение не релевантно
+      }
+    }
+    await this.tryConnect(this.strategy);
+  }
+
+  /**
+   * Обёртка операции таймаутом + retry с переподключением (design D3).
+   * Одна попытка в Promise.race с timeout; при таймауте — logout + client=null
+   * (ошибка таймаута трактуется как connection-error → retry). При connection-
+   * ошибке и оставшихся попытках — reconnect + повтор. Не-connection ошибка
+   * выбрасывается сразу. При исчерпании — ConnectError с маскировкой секретов.
+   */
+  protected async runWithTimeoutAndRetry<T>(
+    op: () => Promise<T>,
+    opts: MailOpOptions,
+  ): Promise<T> {
+    const maxAttempts = opts.maxRetries + 1;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await this.runWithTimeout(op, opts.timeoutMs);
+      } catch (err) {
+        lastErr = err;
+        if (!this.isConnectionError(err)) throw err;
+        if (attempt + 1 < maxAttempts) {
+          await this.reconnect();
+          continue;
+        }
+      }
+    }
+    // Маскируем секреты, если аккаунт ещё доступен (не disposed).
+    const account = this.account;
+    const message = lastErr instanceof Error ? lastErr.message : String(lastErr);
+    if (account) {
+      throw new ConnectError(redact(message, account.password, account.login));
+    }
+    throw new ConnectError(message);
+  }
+
+  /** Promise.race(op, timeout) с принудительным logout при таймауте. */
+  protected async runWithTimeout<T>(op: () => Promise<T>, timeoutMs: number): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new ConnectError(`превышен таймаут операции (${timeoutMs}мс)`)),
+        timeoutMs,
+      );
+    });
+    try {
+      return await Promise.race([op(), timeout]);
+    } catch (err) {
+      // При таймауте разрываем висящую IMAP-команду logout'ом (Promise.race
+      // не отменяет underlying-вызов imapflow).
+      if (err instanceof ConnectError && err.message.includes('превышен таймаут')) {
+        const oldClient = this.client;
+        this.client = null;
+        if (oldClient) {
+          oldClient.logout().catch(() => undefined);
+        }
+      }
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async dispose(): Promise<void> {

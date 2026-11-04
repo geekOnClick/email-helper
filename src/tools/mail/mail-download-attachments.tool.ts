@@ -1,7 +1,7 @@
 import type { ToolDef } from '../registry.js';
 import { MailSessionStore } from './session-store.js';
 import { ConnectError } from './providers/abstract-imap-provider.js';
-import type { DownloadResult } from '../../types/email.js';
+import type { DownloadResult, MailOpOptions } from '../../types/email.js';
 
 export interface MailDownloadAttachmentsArgs {
   login: string;
@@ -17,6 +17,8 @@ export interface MailDownloadAttachmentsDeps {
   sessionStore: MailSessionStore;
   /** Каталог по умолчанию (DOWNLOAD_DIR из конфига). */
   defaultDownloadDir: string;
+  /** Опции устойчивости (timeout/retry) — change mail-search-robustness. */
+  mailOpOptions?: MailOpOptions;
 }
 
 /**
@@ -60,6 +62,7 @@ export function createMailDownloadAttachmentsTool(
       return await provider.downloadAttachments(uid, targetDir, {
         folder: args.folder,
         names: args.names,
+        ...(deps.mailOpOptions ?? {}),
       });
     },
   };

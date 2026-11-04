@@ -1,6 +1,7 @@
 import type { ToolDef } from '../registry.js';
 import { MailSessionStore } from './session-store.js';
 import { ConnectError } from './providers/abstract-imap-provider.js';
+import type { MailOpOptions } from '../../types/email.js';
 
 export interface MailListFoldersArgs {
   login: string;
@@ -8,6 +9,8 @@ export interface MailListFoldersArgs {
 
 export interface MailListFoldersDeps {
   sessionStore: MailSessionStore;
+  /** Опции устойчивости (timeout/retry) — change mail-search-robustness. */
+  mailOpOptions?: MailOpOptions;
 }
 
 /**
@@ -34,7 +37,7 @@ export function createMailListFoldersTool(deps: MailListFoldersDeps): ToolDef<Ma
         throw new ConnectError(`mail.listFolders: подключение не установлено для ${login}`);
       }
 
-      return await provider.listFolders();
+      return await provider.listFolders(deps.mailOpOptions);
     },
   };
 }

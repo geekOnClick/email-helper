@@ -1,7 +1,7 @@
 import type { ToolDef } from '../registry.js';
 import { MailSessionStore } from './session-store.js';
 import { ConnectError } from './providers/abstract-imap-provider.js';
-import type { EmailFull } from '../../types/email.js';
+import type { EmailFull, MailOpOptions } from '../../types/email.js';
 
 export interface MailFetchArgs {
   login: string;
@@ -11,6 +11,8 @@ export interface MailFetchArgs {
 
 export interface MailFetchDeps {
   sessionStore: MailSessionStore;
+  /** Опции устойчивости (timeout/retry) — change mail-search-robustness. */
+  mailOpOptions?: MailOpOptions;
 }
 
 /**
@@ -46,7 +48,7 @@ export function createMailFetchTool(deps: MailFetchDeps): ToolDef<MailFetchArgs>
         throw new ConnectError(`mail.fetch: подключение не установлено для ${login}`);
       }
 
-      return await provider.fetch(uid, args.folder);
+      return await provider.fetch(uid, args.folder, deps.mailOpOptions);
     },
   };
 }

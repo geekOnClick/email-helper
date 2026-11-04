@@ -22,6 +22,7 @@ import type { Subagent } from '../../agents/subagent.js';
 import type { Config } from '../../config/schema.js';
 import type { MailAccount } from '../../tools/mail/types.js';
 import type { CreateMailProviderOptions } from '../../tools/mail/providers/factory.js';
+import type { MailOpOptions } from '../../types/email.js';
 
 /** Опции bootstrap (для тестов — инжектируемый конфиг/env). */
 export interface BootstrapOptions {
@@ -73,6 +74,15 @@ export async function bootstrap(opts: BootstrapOptions = {}): Promise<BootstrapR
 
   const result = await buildAgent(config, accounts, oauth2, opts);
   return result;
+}
+
+/** Опции устойчивости IMAP-операций из конфига (mail-search-robustness). */
+function mailOpOptionsFromConfig(config: Config): MailOpOptions {
+  return {
+    timeoutMs: config.MAIL_OP_TIMEOUT_MS,
+    maxRetries: config.MAIL_OP_MAX_RETRIES,
+    fallbackDays: config.MAIL_SEARCH_FALLBACK_DAYS,
+  };
 }
 
 /** Внутренняя сборка: вынесена для переиспользования в createAgent. */
@@ -128,6 +138,7 @@ async function buildAgent(
     embeddingsClient,
     falkorClient,
     toolLogger,
+    mailOpOptions: mailOpOptionsFromConfig(config),
   });
 
   // Анализатор для команды /analyze (прямой вызов, вне цикла delegate оркестратора).

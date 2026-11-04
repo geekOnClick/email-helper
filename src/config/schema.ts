@@ -50,6 +50,14 @@ export const ConfigSchema = z.object({
   ACCOUNTS: z.string().default('[]'),
   DOWNLOAD_DIR: z.string().default('./downloads'),
 
+  // === Устойчивость IMAP-операций (mail-search-robustness) ===
+  // Общий таймаут одной попытки для всех IMAP-тулов (search/fetch/downloadAttachments/listFolders).
+  MAIL_OP_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  // Число повторов с переподключением при сетевом обрыве/таймауте.
+  MAIL_OP_MAX_RETRIES: z.coerce.number().int().nonnegative().default(1),
+  // SINCE по умолчанию (в днях) для subject-only поиска — bounded client-side фолбэкк.
+  MAIL_SEARCH_FALLBACK_DAYS: z.coerce.number().int().positive().default(180),
+
   // === Microsoft identity (OAuth2 для Outlook, Phase 1) ===
   // Public client (без секрета), tenant 'consumers' для личных @outlook.com
   MS_CLIENT_ID: z.string().default(''),

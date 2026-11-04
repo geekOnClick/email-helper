@@ -34,7 +34,10 @@ describe('mail.search tool', () => {
     const res = await tool.handler({ login: 'a@yandex.com', criteria: { subject: 'X' } });
     expect(res).toHaveProperty('messages');
     expect(res.total).toBe(1);
-    expect(fakeProvider.search).toHaveBeenCalledWith(expect.objectContaining({ subject: 'X' }));
+    expect(fakeProvider.search).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: 'X' }),
+      undefined,
+    );
   });
 
   it('без сессии — ошибка "подключение не установлено"', async () => {

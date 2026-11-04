@@ -70,6 +70,16 @@ export interface SearchResult {
   hasMore: boolean;
 }
 
+/** Опции устойчивости IMAP-операций (change mail-search-robustness). */
+export interface MailOpOptions {
+  /** Таймаут одной попытки (мс) для всех IMAP-операций тулов. */
+  timeoutMs: number;
+  /** Число повторов с переподключением при сетевом обрыве/таймауте. */
+  maxRetries: number;
+  /** SINCE по умолчанию (в днях) для subject-only поиска (только для search). */
+  fallbackDays: number;
+}
+
 // === mail-attachments: чтение содержимого и вложений ===
 
 /** Метаданные вложения (без тела). */

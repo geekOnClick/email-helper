@@ -30,7 +30,7 @@ describe('mail.fetch tool', () => {
     const tool = createMailFetchTool({ sessionStore: store });
     const res = await tool.handler({ login: 'a@yandex.com', uid: 5 });
     expect(res).toHaveProperty('body');
-    expect(fp.fetch).toHaveBeenCalledWith(5, undefined);
+    expect(fp.fetch).toHaveBeenCalledWith(5, undefined, undefined);
   });
 
   it('явная папка передаётся', async () => {
@@ -39,7 +39,7 @@ describe('mail.fetch tool', () => {
     store.set(ACCOUNT, fp);
     const tool = createMailFetchTool({ sessionStore: store });
     await tool.handler({ login: 'a@yandex.com', uid: 5, folder: 'Archive' });
-    expect(fp.fetch).toHaveBeenCalledWith(5, 'Archive');
+    expect(fp.fetch).toHaveBeenCalledWith(5, 'Archive', undefined);
   });
 
   it('без сессии — ошибка', async () => {

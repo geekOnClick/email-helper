@@ -23,6 +23,7 @@ import type { RouterAiClient } from '../llm/routerai-client.js';
 import type { EmbeddingsClient } from '../llm/embeddings.js';
 import type { FalkorClient } from '../tools/vector/falkor.js';
 import type { Config } from '../config/schema.js';
+import type { MailOpOptions } from '../types/email.js';
 
 /** Опции сборки агента. */
 export interface ComposeAgentsOptions {
@@ -48,6 +49,8 @@ export interface ComposeAgentsOptions {
   maxIterations?: number;
   /** Переопределение лимита символов результата тулa. */
   maxToolResultChars?: number;
+  /** Опции устойчивости IMAP-операций (change mail-search-robustness). */
+  mailOpOptions?: MailOpOptions;
   /** Логгер вызовов тулов (опц.); по умолчанию создаётся консольный с маскированием секретов аккаунтов. */
   toolLogger?: ToolLogger;
 }
@@ -69,6 +72,7 @@ export async function composeAgents(opts: ComposeAgentsOptions): Promise<Orchest
     sessionStore: getSharedSessionStore(),
     downloadDir: opts.downloadDir,
     smtpTransportFactory: opts.smtpTransportFactory,
+    mailOpOptions: opts.mailOpOptions,
   });
 
   // 1b. Регистрация векторных тулов — только если оба клиента переданы.

@@ -44,22 +44,72 @@ const MESSAGES = [
 ];
 
 /**
- * Фабрика stub-клиента: server-side search возвращает [] (имитация ненадёжного
- * SEARCH Яндекса), fetchAll('1:*') возвращает все сообщения для fallback.
+ * Фабрика stub-клиента под НОВЫЙ контракт (change mail-search-robustness):
+ * серверный SEARCH Яндекса по `subject` ненадёжен (возвращает []), но по
+ * `from`/`since`/флагам — надёжен (возвращает UID'ы). При fallback система
+ * сужает надёжными критериями и фетчит метаданные только по суженному набору,
+ * затем дофильтровывает локально по subject.
  */
-function makeFactory(opts: { searchResult?: number[]; messages?: typeof MESSAGES }): ImapClientFactory {
+function makeFactory(opts: {
+  subjectSearchResult?: number[];
+  messages?: typeof MESSAGES;
+  fallbackDays?: number;
+}): ImapClientFactory {
   const messages = opts.messages ?? MESSAGES;
+  const subjectUids = opts.subjectSearchResult ?? [];
   return () =>
     ({
       connect: vi.fn().mockResolvedValue(undefined),
       list: vi.fn().mockResolvedValue([INBOX]),
       mailboxOpen: vi.fn().mockResolvedValue(undefined),
-      // server-side SEARCH всегда возвращает пусто (имитация бага Яндекса)
-      search: vi.fn().mockResolvedValue(opts.searchResult ?? []),
-      // fetchAll возвращает сообщения по UID-диапазону
+      // search: по subject (ненадёжный) → [], иначе → UID'ы по надёжным критериям
+      search: vi.fn().mockImplementation((query: Record<string, unknown>) => {
+        if (query.subject !== undefined) return Promise.resolve(subjectUids);
+        // надёжные критерии: фильтруем сообщения по ним (имитация серверного поиска)
+        let uids = messages.map((m) => m.uid);
+        if (query.from !== undefined) {
+          const f = String(query.from).toLowerCase();
+          uids = uids.filter((uid) => {
+            const m = messages.find((mm) => mm.uid === uid);
+            return (
+              m?.envelope.from?.[0]?.address?.toLowerCase().includes(f) === true ||
+              m?.envelope.from?.[0]?.name?.toLowerCase().includes(f) === true
+            );
+          });
+        }
+        if (query.to !== undefined) {
+          const t = String(query.to).toLowerCase();
+          uids = uids.filter((uid) => {
+            const m = messages.find((mm) => mm.uid === uid);
+            return m?.envelope.to?.some((a) => `${a.address} ${a.name ?? ''}`.toLowerCase().includes(t)) === true;
+          });
+        }
+        if (query.since !== undefined) {
+          const since = query.since instanceof Date ? query.since : new Date(query.since as string);
+          uids = uids.filter((uid) => {
+            const m = messages.find((mm) => mm.uid === uid);
+            return (m?.internalDate ?? new Date(0)) >= since;
+          });
+        }
+        if (query.before !== undefined) {
+          const before = query.before instanceof Date ? query.before : new Date(query.before as string);
+          uids = uids.filter((uid) => {
+            const m = messages.find((mm) => mm.uid === uid);
+            return (m?.internalDate ?? new Date(0)) < before;
+          });
+        }
+        if (query.seen === false) {
+          uids = uids.filter((uid) => {
+            const m = messages.find((mm) => mm.uid === uid);
+            return m ? !m.flags.has('\\Seen') : true;
+          });
+        }
+        return Promise.resolve(uids);
+      }),
+      // fetchAll по UID-диапазону (новый код не использует '1:*')
       fetchAll: vi.fn().mockImplementation((range: string) => {
-        // для '1:*' возвращаем все; для конкретного UID — фильтр
-        if (range === '1:*') return Promise.resolve(messages);
+        // '1:*' не должно вызываться в новом коде — если вызван, это баг.
+        if (range === '1:*') return Promise.resolve([]);
         const uids = range.split(',').map((n) => Number(n));
         const filtered = messages.filter((m) => uids.includes(m.uid));
         return Promise.resolve(filtered);
@@ -68,18 +118,19 @@ function makeFactory(opts: { searchResult?: number[]; messages?: typeof MESSAGES
     }) as never;
 }
 
-describe('AbstractImapProvider: client-side fallback search', () => {
+describe('AbstractImapProvider: bounded client-side fallback (mail-search-robustness)', () => {
   let factory: ImapClientFactory;
 
   beforeEach(() => {
     factory = makeFactory({});
   });
 
-  it('серверный search вернул 0 → fallback находит по subject (кириллица)', async () => {
+  it('серверный search по subject вернул 0 → fallback сужается SINCE по умолчанию и находит по subject (кириллица)', async () => {
     const provider = new YandexMailProvider({ account, clientFactory: factory });
     await provider.connect();
     const result = await provider.search({ subject: 'Нормоконтроль' } as SearchCriteria);
-    expect(result.total).toBe(1);
+    expect(result.total).toBe(2); // суженный набор SINCE (все 2 письма)
+    expect(result.messages).toHaveLength(1); // дофильтровка по subject
     expect(result.messages[0]?.uid).toBe(2);
     expect(result.messages[0]?.subject).toBe('Нормоконтроль  ВКР Козлов А.В.');
   });
@@ -88,11 +139,11 @@ describe('AbstractImapProvider: client-side fallback search', () => {
     const provider = new YandexMailProvider({ account, clientFactory: factory });
     await provider.connect();
     const result = await provider.search({ subject: 'ВКР' } as SearchCriteria);
-    expect(result.total).toBe(1);
+    expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.uid).toBe(2);
   });
 
-  it('fallback находит по from (email)', async () => {
+  it('fallback сужается имеющимся from — fetchAll только по найденным UID', async () => {
     const provider = new YandexMailProvider({ account, clientFactory: factory });
     await provider.connect();
     const result = await provider.search({ from: 'Kozloww1508@yandex.ru' } as SearchCriteria);
@@ -100,24 +151,25 @@ describe('AbstractImapProvider: client-side fallback search', () => {
     expect(result.messages[0]?.uid).toBe(2);
   });
 
-  it('fallback находит по from (имя)', async () => {
+  it('fallback по from (имя) находит письмо', async () => {
     const provider = new YandexMailProvider({ account, clientFactory: factory });
     await provider.connect();
     const result = await provider.search({ from: 'Козлов' } as SearchCriteria);
-    expect(result.total).toBe(1);
+    expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.uid).toBe(2);
   });
 
-  it('fallback находит по to', async () => {
+  it('fallback сужается имеющимся to', async () => {
     const provider = new YandexMailProvider({ account, clientFactory: factory });
     await provider.connect();
     const result = await provider.search({ to: 'test@yandex.com' } as SearchCriteria);
     expect(result.total).toBe(2);
+    expect(result.messages).toHaveLength(2);
   });
 
-  it('серверный search нашёл → fallback НЕ вызывается', async () => {
-    // Если сервер вернул UID, fallback не нужен.
-    const f = makeFactory({ searchResult: [2] });
+  it('серверный search нашёл → fallback НЕ вызывается (без второй search-попытки)', async () => {
+    // Если сервер вернул UID по subject — fallback не нужен.
+    const f = makeFactory({ subjectSearchResult: [2] });
     const provider = new YandexMailProvider({ account, clientFactory: f });
     await provider.connect();
     const result = await provider.search({ subject: 'Нормоконтроль' } as SearchCriteria);
@@ -125,21 +177,22 @@ describe('AbstractImapProvider: client-side fallback search', () => {
     expect(result.messages[0]?.uid).toBe(2);
   });
 
-  it('без текстовых критериев → fallback НЕ вызывается', async () => {
-    const f = makeFactory({ searchResult: [] });
+  it('без текстовых критериев → fallback НЕ вызывается (пустой результат)', async () => {
+    const f = makeFactory({ subjectSearchResult: [] });
     const provider = new YandexMailProvider({ account, clientFactory: f });
     await provider.connect();
     // только unseen — нет текстовых критериев, fallback не нужен
     const result = await provider.search({ unseen: true } as SearchCriteria);
-    expect(result.total).toBe(0);
-    expect(result.messages).toEqual([]);
+    expect(result.total).toBe(1);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.uid).toBe(2);
   });
 
-  it('нет совпадений → пустой результат', async () => {
+  it('нет совпадений по subject → пустой результат (дофильтровка)', async () => {
     const provider = new YandexMailProvider({ account, clientFactory: factory });
     await provider.connect();
     const result = await provider.search({ subject: 'несуществующая тема' } as SearchCriteria);
-    expect(result.total).toBe(0);
+    expect(result.total).toBe(2);
     expect(result.messages).toEqual([]);
   });
 
@@ -154,7 +207,7 @@ describe('AbstractImapProvider: client-side fallback search', () => {
     expect(result.messages[0]?.uid).toBe(2);
   });
 
-  it('subject + before → отсеивает будущие письма', async () => {
+  it('to + before → отсеивает будущие письма', async () => {
     const provider = new YandexMailProvider({ account, clientFactory: factory });
     await provider.connect();
     const result = await provider.search({
@@ -163,5 +216,27 @@ describe('AbstractImapProvider: client-side fallback search', () => {
     } as SearchCriteria);
     expect(result.total).toBe(1);
     expect(result.messages[0]?.uid).toBe(1);
+  });
+
+  it('сервер вернул ложные совпадения по subject → дофильтровка отсекает лишние (D2)', async () => {
+    // Сервер «нашёл» по subject оба UID (ненадёжно), но реально subject
+    // совпадает только у uid=2. Дофильтровка должна отсечь uid=1.
+    const f = makeFactory({ subjectSearchResult: [1, 2] });
+    const provider = new YandexMailProvider({ account, clientFactory: f });
+    await provider.connect();
+    const result = await provider.search({ subject: 'Нормоконтроль' } as SearchCriteria);
+    expect(result.total).toBe(2); // серверный набор
+    expect(result.messages).toHaveLength(1); // локальная дофильтровка
+    expect(result.messages[0]?.uid).toBe(2);
+  });
+
+  it('fallback не обращается ко всей папке (нет fetchAll 1:*)', async () => {
+    const provider = new YandexMailProvider({ account, clientFactory: factory });
+    await provider.connect();
+    await provider.search({ subject: 'Нормоконтроль' } as SearchCriteria);
+    const client = (provider as unknown as { client: { fetchAll: ReturnType<typeof vi.fn> } }).client;
+    for (const call of client.fetchAll.mock.calls) {
+      expect(call[0]).not.toBe('1:*');
+    }
   });
 });

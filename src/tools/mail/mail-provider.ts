@@ -5,7 +5,13 @@ import type {
   ImapConnectionOptions,
   MailAccount,
 } from './types.js';
-import type { SearchCriteria, SearchResult, EmailFull, DownloadResult } from '../../types/email.js';
+import type {
+  SearchCriteria,
+  SearchResult,
+  EmailFull,
+  DownloadResult,
+  MailOpOptions,
+} from '../../types/email.js';
 
 /** Параметры SMTP-соединения (host/port/secure), специфичные для провайдера. */
 export interface SmtpConnectionOptions {
@@ -55,16 +61,20 @@ export interface MailProvider {
   /** Подключение к ящику. Открывает IMAP-сессию. */
   connect(): Promise<ConnectionResult>;
   /** Список папок ящика (требует активную сессию). */
-  listFolders(): Promise<Folder[]>;
+  listFolders(options?: Partial<MailOpOptions>): Promise<Folder[]>;
   /** Поиск писем по критериям в указанной папке. Требует активную сессию. */
-  search(criteria: SearchCriteria): Promise<SearchResult>;
+  search(criteria: SearchCriteria, options?: Partial<MailOpOptions>): Promise<SearchResult>;
   /** Чтение письма по UID: тело + метаданные вложений. */
-  fetch(uid: number, folder?: string): Promise<EmailFull>;
+  fetch(
+    uid: number,
+    folder?: string,
+    options?: Partial<MailOpOptions>,
+  ): Promise<EmailFull>;
   /** Скачивание вложений письма в локальный каталог. */
   downloadAttachments(
     uid: number,
     targetDir: string,
-    options?: { folder?: string; names?: string[] },
+    options?: { folder?: string; names?: string[] } & Partial<MailOpOptions>,
   ): Promise<DownloadResult>;
   /** Закрытие сессии, освобождение соединения. */
   dispose(): Promise<void>;
