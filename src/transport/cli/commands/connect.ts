@@ -33,9 +33,10 @@ export async function ensureMailConnected(
     return false;
   }
 
-  io.write(`Подключение к ${account.login}...\n`);
+  io.write(`Подключение к ${account.login}...
+`);
   try {
-    await connectTool.handler({ login: account.login });
+    await connectTool.handler({ login: account.login, provider: account.provider });
     io.write('Подключено.\n');
     return true;
   } catch (err) {

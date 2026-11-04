@@ -50,13 +50,13 @@ describe('ensureMailConnected', () => {
   it('сессии нет → вызывает mail.connect, true при успехе', async () => {
     const store = getSharedSessionStore();
     store.dispose(ACCOUNT.login);
-    const calls: string[] = [];
+    const calls: { login?: string; provider?: string }[] = [];
     registerTool({
       name: 'mail.connect',
       description: 'stub',
       inputSchema: { type: 'object' },
       handler: async (args) => {
-        calls.push(args.login);
+        calls.push(args as { login?: string; provider?: string });
         store.set(ACCOUNT, stubProvider()); // имитируем, что тул сохранил сессию
         return { ok: true, login: ACCOUNT.login };
       },
@@ -65,7 +65,7 @@ describe('ensureMailConnected', () => {
     const io = new MockConsoleIO([]);
     const ok = await ensureMailConnected(io, ACCOUNT);
     expect(ok).toBe(true);
-    expect(calls).toEqual([ACCOUNT.login]);
+    expect(calls).toEqual([{ login: ACCOUNT.login, provider: ACCOUNT.provider }]);
     expect(io.output()).toContain('Подключено');
   });
 
