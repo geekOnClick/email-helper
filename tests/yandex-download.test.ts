@@ -162,6 +162,111 @@ describe('YandexMailProvider.downloadAttachments', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('восстанавливает точку перед слипшимся расширением xls (meta.filename)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dl-'));
+    const xlsName = 'СчетНаПредоплату1-1292-2-30-2610 период-Ноябрь 2026 гxls';
+    const factory = makeFactory({
+      rows: [makeRow(20, [{ part: '2', filename: xlsName, contentType: 'application/vnd.ms-excel' }])],
+      downloaded: {
+        '2': {
+          content: Buffer.from('XLS-DATA'),
+          meta: { filename: xlsName, contentType: 'application/vnd.ms-excel' },
+        } as never,
+      },
+    });
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    const res = await p.downloadAttachments(20, dir);
+    expect(res.paths).toHaveLength(1);
+    const savedName = res.paths[0]?.split('/').pop();
+    expect(savedName).toBe('СчетНаПредоплату1-1292-2-30-2610 период-Ноябрь 2026 г.xls');
+    expect(await readFile(join(dir, savedName ?? ''), 'utf8')).toBe('XLS-DATA');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('не меняет корректное расширение pdf (регрессия)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dl-'));
+    const factory = makeFactory({
+      rows: [makeRow(21, [{ part: '2', filename: 'report.pdf', contentType: 'application/pdf' }])],
+      downloaded: {
+        '2': {
+          content: Buffer.from('PDF'),
+          meta: { filename: 'report.pdf', contentType: 'application/pdf' },
+        } as never,
+      },
+    });
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    const res = await p.downloadAttachments(21, dir);
+    expect(res.paths[0]?.split('/').pop()).toBe('report.pdf');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('fallback имени из bodyStructure + расширение из content-type, когда meta.filename пуст', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dl-'));
+    const factory = makeFactory({
+      rows: [makeRow(22, [{ part: '2', filename: 'документ', contentType: 'application/pdf' }])],
+      downloaded: {
+        '2': {
+          content: Buffer.from('PDF'),
+          meta: { contentType: 'application/pdf' }, // filename отсутствует
+        } as never,
+      },
+    });
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    const res = await p.downloadAttachments(22, dir);
+    expect(res.paths[0]?.split('/').pop()).toBe('документ.pdf');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('восстановление расширения — до суффикса коллизии', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dl-'));
+    const { writeFile } = await import('node:fs/promises');
+    // предварительно существует Счет.xls
+    await writeFile(join(dir, 'Счет.xls'), 'exists');
+    const factory = makeFactory({
+      rows: [makeRow(23, [{ part: '2', filename: 'Счетxls', contentType: 'application/vnd.ms-excel' }])],
+      downloaded: {
+        '2': {
+          content: Buffer.from('NEW'),
+          meta: { filename: 'Счетxls', contentType: 'application/vnd.ms-excel' },
+        } as never,
+      },
+    });
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    const res = await p.downloadAttachments(23, dir);
+    expect(res.paths[0]?.split('/').pop()).toBe('Счет-1.xls');
+    // старый файл не перезаписан
+    expect(await readFile(join(dir, 'Счет.xls'), 'utf8')).toBe('exists');
+    expect(await readFile(join(dir, 'Счет-1.xls'), 'utf8')).toBe('NEW');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('сохраняет двойную точку в реальном xls-имени (регрессия бага отправителя)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dl-'));
+    // реальное имя от Автозаводской ТЭЦ: двойная точка перед xls, content-type octet-stream
+    const realName = 'Акт-1292-2-30-2608 период-Август 2026 г..xls';
+    const factory = makeFactory({
+      rows: [makeRow(24, [{ part: '2', filename: realName, contentType: 'application/octet-stream' }])],
+      downloaded: {
+        '2': {
+          content: Buffer.from('XLS-DATA'),
+          meta: { filename: realName, contentType: 'application/octet-stream' },
+        } as never,
+      },
+    });
+    const p = new YandexMailProvider({ account, clientFactory: factory });
+    await p.connect();
+    const res = await p.downloadAttachments(24, dir);
+    expect(res.paths).toHaveLength(1);
+    // двойная точка сохранена — расширение не потеряно
+    expect(res.paths[0]?.split('/').pop()).toBe('Акт-1292-2-30-2608 период-Август 2026 г..xls');
+    expect(await readFile(join(dir, 'Акт-1292-2-30-2608 период-Август 2026 г..xls'), 'utf8')).toBe('XLS-DATA');
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it('ошибка не раскрывает пароль', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dl-'));
     const factory: ImapClientFactory = () => ({

@@ -6,6 +6,7 @@ import {
   sanitizeFilename,
   uniqueFilename,
   isInsideDir,
+  ensureExtension,
 } from '../src/tools/mail/filename.js';
 import { ensureDir } from '../src/tools/mail/fs.js';
 
@@ -32,6 +33,23 @@ describe('sanitizeFilename', () => {
     const out = sanitizeFilename(long);
     expect(Buffer.byteLength(out, 'utf8')).toBeLessThanOrEqual(200);
     expect(out.endsWith('.pdf')).toBe(true);
+  });
+
+  it('сохраняет легитимную двойную точку в имени (регресс xls-бага)', () => {
+    // отправитель (Автозаводская ТЭЦ) присылает имя с двойной точкой перед расширением;
+    // жадный replace(/\.\./g,'') вырезал обе точки → терялось расширение
+    expect(sanitizeFilename('Акт-1292-2-30-2608 период-Август 2026 г..xls'))
+      .toBe('Акт-1292-2-30-2608 период-Август 2026 г..xls');
+  });
+
+  it('сохраняет несколько двойных точек в середине имени', () => {
+    expect(sanitizeFilename('версия..1..2.pdf')).toBe('версия..1..2.pdf');
+  });
+
+  it('path-сегмент .. между разделителями вырезается, двойная точка в имени остается', () => {
+    // `a/../b.xls` — basename даёт `b.xls`, но проверяем что path-component `..` вырезан,
+    // а легитимная двойная точка `..xls` сохранена
+    expect(sanitizeFilename('a/../b..xls')).toBe('b..xls');
   });
 });
 
@@ -94,5 +112,62 @@ describe('ensureDir', () => {
     await ensureDir(target);
     expect(true).toBe(true); // без ошибок
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('ensureExtension', () => {
+  it('вставляет точку перед слипшимся расширением xls', () => {
+    expect(ensureExtension('СчетНаПредоплату1-1292-2-30-2610 период-Ноябрь 2026 гxls', 'application/vnd.ms-excel'))
+      .toBe('СчетНаПредоплату1-1292-2-30-2610 период-Ноябрь 2026 г.xls');
+  });
+
+  it('не меняет имя с корректным расширением (pdf)', () => {
+    expect(ensureExtension('report.pdf', 'application/pdf')).toBe('report.pdf');
+  });
+
+  it('добавляет расширение из content-type, если в имени его нет', () => {
+    expect(ensureExtension('документ', 'application/pdf')).toBe('документ.pdf');
+  });
+
+  it('не выдумывает расширение для неизвестного content-type', () => {
+    expect(ensureExtension('данные', 'application/octet-stream')).toBe('данные');
+  });
+
+  it('не выдумывает расширение при отсутствии content-type', () => {
+    expect(ensureExtension('документ', undefined)).toBe('документ');
+  });
+
+  it('D2.2 приоритет над D2.3: Счетxls + application/vnd.ms-excel → Счет.xls (без второго .xls)', () => {
+    expect(ensureExtension('Счетxls', 'application/vnd.ms-excel')).toBe('Счет.xls');
+  });
+
+  it('распознаёт слипшееся xlsx раньше xls (сортировка по длине)', () => {
+    expect(ensureExtension('отчётxlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))
+      .toBe('отчёт.xlsx');
+  });
+
+  it('распознаёт слипшееся docx раньше doc', () => {
+    expect(ensureExtension('актdocx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'))
+      .toBe('акт.docx');
+  });
+
+  it('не трогает имя, уже заканчивающееся точкой+расширение, даже при слипшемся content-type', () => {
+    // report.pdf уже корректно — content-type не добавляет второй .pdf
+    expect(ensureExtension('report.pdf', 'application/pdf')).toBe('report.pdf');
+  });
+
+  it('не трогает имя с расширением, не совпадающим с content-type', () => {
+    // имя с корректным расширением .txt — не меняется, даже если content-type другой
+    expect(ensureExtension('notes.txt', 'application/pdf')).toBe('notes.txt');
+  });
+
+  it('пустое имя → пустое имя', () => {
+    expect(ensureExtension('', 'application/pdf')).toBe('');
+  });
+
+  it('path-traversal имя проходит как есть (sanitizeFilename сработает позже)', () => {
+    // ensureExtension не распознаёт расширение → возвращает как есть;
+    // последующий sanitizeFilename уберёт `..`
+    expect(ensureExtension('../etc/passwd', 'application/octet-stream')).toBe('../etc/passwd');
   });
 });

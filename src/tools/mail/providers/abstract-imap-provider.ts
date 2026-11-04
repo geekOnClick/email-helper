@@ -8,7 +8,7 @@ import { resolveFolder } from '../folder-resolver.js';
 import { toEmailMessage } from '../email-mapper.js';
 import { extractAttachments } from '../attachments.js';
 import { ensureDir } from '../fs.js';
-import { uniqueFilename, isInsideDir } from '../filename.js';
+import { uniqueFilename, isInsideDir, ensureExtension } from '../filename.js';
 import type {
   ConnectionResult,
   Folder,
@@ -355,7 +355,15 @@ export abstract class AbstractImapProvider implements MailProvider {
       for (const att of wanted) {
         const dl = downloaded[att.part];
         if (!dl) continue;
-        const safeName = await uniqueFilename(absDir, att.filename);
+        // meta типизирован как Record<string, unknown> (см. types.ts ImapClient.downloadMany),
+        // поэтому поля фильтруем через typeof. Приоритет: имя из реального потока
+        // (meta.filename, декодированное libmime) над именем из bodyStructure (att.filename).
+        // Затем восстанавливаем расширение, если оно слиплось или отсутствует (design.md D1–D3).
+        const metaFilename = typeof dl.meta?.filename === 'string' ? dl.meta.filename : undefined;
+        const metaContentType = typeof dl.meta?.contentType === 'string' ? dl.meta.contentType : undefined;
+        const rawName = metaFilename || att.filename;
+        const withExt = ensureExtension(rawName, metaContentType);
+        const safeName = await uniqueFilename(absDir, withExt);
         const target = join(absDir, safeName);
         if (!isInsideDir(target, absDir)) {
           throw new ConnectError(`небезопасный путь: ${safeName}`);
