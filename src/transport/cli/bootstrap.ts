@@ -48,6 +48,8 @@ export interface BootstrapResult {
   registry: AccountRegistry;
   /** Папка загрузки по умолчанию (для /download). */
   downloadDir: string;
+  /** Окно bounded-поиска (дней) для /find без явной даты (MAIL_SEARCH_FALLBACK_DAYS). */
+  fallbackDays: number;
   /** Статистика сессии для REPL (питается toolLogger агента). */
   stats: SessionStats;
   /** Освобождает занятые ресурсы (mail-сессии, FalkorDB). */
@@ -155,5 +157,5 @@ async function buildAgent(
     if (falkorClient) await falkorClient.close();
   };
 
-  return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, stats, cleanup };
+  return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, fallbackDays: config.MAIL_SEARCH_FALLBACK_DAYS, stats, cleanup };
 }

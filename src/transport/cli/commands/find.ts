@@ -4,14 +4,30 @@
  * Собирает критерии через мастер, запрашивает выбор аккаунта, вызывает
  * тул mail.search и выводит список найденных писем. Детерминированный поток
  * без LLM на этапе ввода.
+ *
+ * Подход (как у /find-all): серверный IMAP SEARCH Яндекса по кириллическим
+ * `subject`-литералам и `from` ненадёжен — возвращает 0 либо неполный набор.
+ * Поэтому на сервер передаётся ТОЛЬКО диапазон дат (`since`/`before`,
+ * надёжный критерий), а `subject`/`from` фильтруются ЛОКАЛЬНО после фетча
+ * (через `collectAllMessages`). Так находятся все совпадения, независимо от
+ * ненадёжности серверного SEARCH по теме/отправителю.
+ *
+ * - Явная `дата` → `since` = полночь указанного дня, `before` = следующий день
+ *   (один день включительно), как в /find-all.
+ * - Без даты → bounded `since` = `now − fallbackDays` (по умолчанию 180, из
+ *   конфига `MAIL_SEARCH_FALLBACK_DAYS`), чтобы не фетчить весь ящик. Тулы
+ *   не меняются — bounded-окно формируется на уровне команды.
  */
 import type { ConsoleIO } from '../io.js';
-import { promptSearchCriteria, promptAccount } from '../prompts.js';
+import { promptSearchCriteria, promptAccount, isoToDate, type FindAllSearchArgs } from '../prompts.js';
 import { formatMessageList } from '../format.js';
 import { getTool } from '../../../tools/registry.js';
 import { ensureMailConnected } from './connect.js';
+import { collectAllMessages } from './find-all.js';
 import type { MailAccount } from '../../../tools/mail/types.js';
-import type { SearchResult } from '../../../types/email.js';
+
+/** Дефолт окна bounded-поиска (дней) без явной даты — совпадает с MAIL_SEARCH_FALLBACK_DAYS. */
+const DEFAULT_FALLBACK_DAYS = 180;
 
 /** Зависимости команды /find. */
 export interface FindCommandDeps {
@@ -19,6 +35,8 @@ export interface FindCommandDeps {
   io: ConsoleIO;
   /** Настроенные аккаунты (для выбора). */
   accounts: MailAccount[];
+  /** Окно bounded-поиска (дней) без явной даты. По умолчанию 180. */
+  fallbackDays?: number;
 }
 
 /** Выполняет команду /find. */
@@ -46,13 +64,10 @@ export async function runFindCommand(deps: FindCommandDeps): Promise<void> {
     return;
   }
 
-  let result: SearchResult;
+  const args = buildSearchArgs(criteria, deps.fallbackDays ?? DEFAULT_FALLBACK_DAYS);
+  let result: { messages: import('../../../types/email.js').EmailMessage[]; truncated: boolean };
   try {
-    const raw = await searchTool.handler({
-      login: account.login,
-      criteria: buildSearchCriteria(criteria),
-    });
-    result = raw as SearchResult;
+    result = await collectAllMessages(searchTool, account.login, args);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     io.write(`Ошибка поиска: ${msg}\n`);
@@ -65,21 +80,37 @@ export async function runFindCommand(deps: FindCommandDeps): Promise<void> {
   }
 
   io.write(formatMessageList(result.messages) + '\n');
+  if (result.truncated) {
+    io.write('⚠ Достигнут лимит пагинации: показаны не все найденные письма.\n');
+  }
 }
 
-/** Строит критерии тулa mail.search из ввода мастера. */
-function buildSearchCriteria(input: {
-  subject?: string;
-  date?: string;
-  from?: string;
-}): {
-  subject?: string;
-  since?: string;
-  from?: string;
-} {
-  const result: { subject?: string; since?: string; from?: string } = {};
-  if (input.subject) result.subject = input.subject;
-  if (input.date) result.since = input.date;
-  if (input.from) result.from = input.from;
-  return result;
+/**
+ * Строит аргументы поиска (FindAllSearchArgs) из ввода мастера:
+ * - `serverCriteria` — ТОЛЬКО даты (`since`/`before`): явная `дата` → один день
+ *   включительно; без даты → bounded `now − fallbackDays`.
+ * - `subject`/`from` — остаются для локальной фильтрации (не идут на сервер).
+ */
+function buildSearchArgs(
+  input: { subject?: string; date?: string; from?: string },
+  fallbackDays: number,
+): FindAllSearchArgs {
+  const server: { since?: Date; before?: Date } = {};
+  if (input.date) {
+    // один день включительно: since = полночь указанного дня, before = следующий день
+    server.since = isoToDate(input.date);
+    const before = isoToDate(input.date);
+    before.setDate(before.getDate() + 1);
+    server.before = before;
+  } else {
+    // bounded окно без явной даты — не фетчить весь ящик
+    const since = new Date();
+    since.setDate(since.getDate() - fallbackDays);
+    server.since = since;
+  }
+  return {
+    serverCriteria: server,
+    subject: input.subject,
+    from: input.from,
+  };
 }

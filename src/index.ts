@@ -9,7 +9,7 @@ import { CliRepl } from './transport/cli/repl.js';
 import { bootstrap } from './transport/cli/bootstrap.js';
 
 async function main(): Promise<void> {
-  const { analyzer, accounts, registry, downloadDir, stats, cleanup } = await bootstrap();
+  const { analyzer, accounts, registry, downloadDir, fallbackDays, stats, cleanup } = await bootstrap();
 
   const io = new NodeConsoleIO();
   const repl = new CliRepl({
@@ -19,6 +19,7 @@ async function main(): Promise<void> {
     envPath: '.env',
     analyzer,
     downloadDir,
+    fallbackDays,
     stats,
   });
 

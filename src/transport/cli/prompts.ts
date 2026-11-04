@@ -614,7 +614,7 @@ export function buildSearchArgsFromFindAll(criteria: FindAllCriteriaInput): Find
 }
 
 /** Парсит ISO YYYY-MM-DD в локальную полночь (без сдвига часового пояса). */
-function isoToDate(iso: string): Date {
+export function isoToDate(iso: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return new Date(iso);
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));

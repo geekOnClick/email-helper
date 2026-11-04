@@ -42,6 +42,8 @@ export interface GuidedCommandDeps {
   analyzer: Subagent;
   /** Папка загрузки (для /download). */
   downloadDir?: string;
+  /** Окно bounded-поиска (дней) для /find без явной даты (из MAIL_SEARCH_FALLBACK_DAYS). */
+  fallbackDays?: number;
 }
 
 /** Опции конструирования REPL. */
@@ -62,6 +64,7 @@ export class CliRepl {
   private readonly envPath: string;
   private readonly analyzer: Subagent;
   private readonly downloadDir?: string;
+  private readonly fallbackDays?: number;
   private readonly stats: SessionStats;
   private running = false;
 
@@ -72,6 +75,7 @@ export class CliRepl {
     this.envPath = opts.envPath;
     this.analyzer = opts.analyzer;
     this.downloadDir = opts.downloadDir;
+    this.fallbackDays = opts.fallbackDays;
     this.stats = opts.stats ?? new SessionStats();
   }
 
@@ -138,7 +142,7 @@ export class CliRepl {
         return false;
       case '/find':
         await this.runSafe(() =>
-          runFindCommand({ io: this.io, accounts: this.registry.list() }),
+          runFindCommand({ io: this.io, accounts: this.registry.list(), fallbackDays: this.fallbackDays }),
         );
         return false;
       case '/find-all':
