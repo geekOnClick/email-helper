@@ -17,7 +17,9 @@ import {
   runDownloadCommand,
   runSendCommand,
 } from './commands/index.js';
+import { runAddAccountCommand } from './commands/add-account.js';
 import type { MailAccount } from '../../tools/mail/types.js';
+import type { AccountRegistry } from '../../config/account-registry.js';
 import type { Subagent } from '../../agents/subagent.js';
 
 /** Признак того, что REPL завершился (для тестов/выхода). */
@@ -29,8 +31,12 @@ export interface ReplExit {
 export interface GuidedCommandDeps {
   /** Ввод/вывод. */
   io: ConsoleIO;
-  /** Настроенные аккаунты. */
+  /** Настроенные аккаунты (для выбора в guided-командах). */
   accounts: MailAccount[];
+  /** In-memory реестр аккаунтов (источник правды для /add-account и выбора аккаунта). */
+  registry: AccountRegistry;
+  /** Путь к .env (для /add-account). */
+  envPath: string;
   /** Субагент-анализатор (для /analyze). */
   analyzer: Subagent;
   /** Папка загрузки (для /download). */
@@ -51,6 +57,8 @@ const PROMPT = '> ';
 export class CliRepl {
   private readonly io: ConsoleIO;
   private readonly accounts: MailAccount[];
+  private readonly registry: AccountRegistry;
+  private readonly envPath: string;
   private readonly analyzer: Subagent;
   private readonly downloadDir?: string;
   private readonly stats: SessionStats;
@@ -59,6 +67,8 @@ export class CliRepl {
   constructor(opts: CliReplOptions) {
     this.io = opts.io;
     this.accounts = opts.accounts;
+    this.registry = opts.registry;
+    this.envPath = opts.envPath;
     this.analyzer = opts.analyzer;
     this.downloadDir = opts.downloadDir;
     this.stats = opts.stats ?? new SessionStats();
@@ -126,24 +136,41 @@ export class CliRepl {
         this.io.write(formatSessionReport(this.stats.getReport(), this.io.isTTY()) + '\n');
         return false;
       case '/find':
-        await this.runSafe(() => runFindCommand({ io: this.io, accounts: this.accounts }));
+        await this.runSafe(() =>
+          runFindCommand({ io: this.io, accounts: this.registry.list() }),
+        );
         return false;
       case '/analyze':
         await this.runSafe(() =>
-          runAnalyzeCommand({ io: this.io, accounts: this.accounts, analyzer: this.analyzer }),
+          runAnalyzeCommand({
+            io: this.io,
+            accounts: this.registry.list(),
+            analyzer: this.analyzer,
+          }),
         );
         return false;
       case '/download':
         await this.runSafe(() =>
           runDownloadCommand({
             io: this.io,
-            accounts: this.accounts,
+            accounts: this.registry.list(),
             downloadDir: this.downloadDir,
           }),
         );
         return false;
       case '/send':
-        await this.runSafe(() => runSendCommand({ io: this.io, accounts: this.accounts }));
+        await this.runSafe(() =>
+          runSendCommand({ io: this.io, accounts: this.registry.list() }),
+        );
+        return false;
+      case '/add-account':
+        await this.runSafe(() =>
+          runAddAccountCommand({
+            io: this.io,
+            registry: this.registry,
+            envPath: this.envPath,
+          }),
+        );
         return false;
       default:
         this.io.write(

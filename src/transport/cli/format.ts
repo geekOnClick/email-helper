@@ -111,6 +111,7 @@ export function formatCommandHelp(useColor = true): string {
     cmd('/analyze', 'найти и проанализировать письмо'),
     cmd('/download', 'найти и скачать вложения письма'),
     cmd('/send', 'отправить письмо с подтверждением'),
+    cmd('/add-account', 'завести/обновить почтовый аккаунт в .env'),
     cmd('/stats', 'статистика сессии (прогоны, тулы, токены)'),
     cmd('/quit', 'завершить сессию'),
     '',

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { bootstrap } from '../src/transport/cli/bootstrap.js';
+import { AccountRegistry } from '../src/config/account-registry.js';
 import { resetTools } from '../src/tools/registry.js';
 
 /** Мок fetch для RouterAiClient: возвращает финальный текст без тулов. */
@@ -43,6 +44,22 @@ describe('bootstrap (сборка агента из конфига)', () => {
     expect(analyzer.name).toBe('analyzer');
     expect(accounts).toEqual([]);
     expect(downloadDir).toBeDefined();
+  });
+
+  it('bootstrap().registry — AccountRegistry с теми же аккаунтами, что ACCOUNTS', async () => {
+    const accountsJson = JSON.stringify([
+      { provider: 'yandex', login: 'a@yandex.com', password: 'p1' },
+      { provider: 'outlook', login: 'b@outlook.com', password: 'p2', authStrategy: 'oauth2' },
+    ]);
+    const { registry, accounts } = await bootstrap({
+      env: makeEnv({ ACCOUNTS: accountsJson }),
+      fetch: mockFetch(),
+      skipFalkor: true,
+    });
+    expect(registry).toBeInstanceOf(AccountRegistry);
+    expect(registry.list()).toEqual(accounts);
+    expect(registry.findByProviderLogin('yandex', 'a@yandex.com')?.password).toBe('p1');
+    expect(registry.findByLogin('b@outlook.com')?.authStrategy).toBe('oauth2');
   });
 
   it('cleanup вызывает disposeAll без ошибок', async () => {

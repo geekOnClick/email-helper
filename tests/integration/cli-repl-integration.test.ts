@@ -5,6 +5,7 @@ import { composeAgents } from '../../src/agents/compose.js';
 import { resetTools } from '../../src/tools/registry.js';
 import { getSharedSessionStore } from '../../src/tools/mail/register-tools.js';
 import { loadConfig } from '../../src/config/loader.js';
+import { AccountRegistry } from '../../src/config/account-registry.js';
 import { noopToolLogger } from '../../src/observability/logger.js';
 import type { MailProvider } from '../../src/tools/mail/mail-provider.js';
 import type { MailAccount } from '../../src/tools/mail/types.js';
@@ -78,7 +79,7 @@ describe('CliRepl: интеграция /analyze с composeAgents', () => {
   beforeEach(() => resetTools());
 
   it('/analyze находит и анализирует письмо через субагента', async () => {
-    const { analyzer, accounts } = await composeAgentWithAnalyzer();
+    const { analyzer, accounts, registry } = await composeAgentWithAnalyzer();
     getSharedSessionStore().set(ACCOUNT, stubProvider());
 
     const io = new MockConsoleIO([
@@ -87,7 +88,7 @@ describe('CliRepl: интеграция /analyze с composeAgents', () => {
       '',
       '/quit',
     ]);
-    const repl = new CliRepl({ io, accounts, analyzer, downloadDir: '/tmp' });
+    const repl = new CliRepl({ io, accounts, registry, envPath: '.env.test', analyzer, downloadDir: '/tmp' });
     const exit = await repl.start();
     const out = io.output();
 
@@ -97,23 +98,25 @@ describe('CliRepl: интеграция /analyze с composeAgents', () => {
   });
 
   it('EOF завершает интеграционную сессию', async () => {
-    const { analyzer, accounts } = await composeAgentWithAnalyzer();
+    const { analyzer, accounts, registry } = await composeAgentWithAnalyzer();
     const io = new MockConsoleIO([]);
-    const repl = new CliRepl({ io, accounts, analyzer, downloadDir: '/tmp' });
+    const repl = new CliRepl({ io, accounts, registry, envPath: '.env.test', analyzer, downloadDir: '/tmp' });
     const exit = await repl.start();
     expect(exit.reason).toBe('eof');
   });
 });
 
-/** Собирает агента и возвращает analyzer + accounts для REPL. */
+/** Собирает агента и возвращает analyzer + accounts + registry для REPL. */
 async function composeAgentWithAnalyzer(): Promise<{
   analyzer: import('../../src/agents/subagent.js').Subagent;
   accounts: MailAccount[];
+  registry: AccountRegistry;
 }> {
   await composeAgents({
     client: scriptedClient(),
     config: makeConfig(),
     accounts: [ACCOUNT],
+    accountRegistry: new AccountRegistry([ACCOUNT]),
     toolLogger: noopToolLogger(),
   });
   // analyzer создаётся в composeAgents, но не возвращается наружу.
@@ -124,5 +127,5 @@ async function composeAgentWithAnalyzer(): Promise<{
     config: makeConfig(),
     toolLogger: noopToolLogger(),
   });
-  return { analyzer, accounts: [ACCOUNT] };
+  return { analyzer, accounts: [ACCOUNT], registry: new AccountRegistry([ACCOUNT]) };
 }

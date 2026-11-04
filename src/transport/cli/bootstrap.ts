@@ -9,6 +9,7 @@
  * завершает процесс с ненулевым кодом, не входя в REPL.
  */
 import { loadConfigWithAccounts } from '../../config/loader.js';
+import { AccountRegistry } from '../../config/account-registry.js';
 import { RouterAiClient } from '../../llm/routerai-client.js';
 import { EmbeddingsClient } from '../../llm/embeddings.js';
 import { FalkorClient } from '../../tools/vector/falkor.js';
@@ -43,6 +44,8 @@ export interface BootstrapResult {
   analyzer: Subagent;
   /** Настроенные аккаунты (для выбора в guided-командах). */
   accounts: MailAccount[];
+  /** In-memory реестр аккаунтов (изменяемый источник правды для тулов и CLI). */
+  registry: AccountRegistry;
   /** Папка загрузки по умолчанию (для /download). */
   downloadDir: string;
   /** Статистика сессии для REPL (питается toolLogger агента). */
@@ -115,6 +118,7 @@ async function buildAgent(
 
   // Статистика сессии + логгер, питающий её (маскирует пароли аккаунтов).
   const stats = new SessionStats();
+  const registry = new AccountRegistry(accounts);
   const accountSecrets = accounts.map((a) => a.password);
   // Составной логгер: консольный (аудит в stderr) + питающий статистику.
   const statsLogger: ToolLogger = {
@@ -132,6 +136,7 @@ async function buildAgent(
     client,
     config,
     accounts,
+    accountRegistry: registry,
     oauth2,
     tokenStorePath: opts.tokenStorePath ?? config.OAUTH_TOKEN_STORE_PATH,
     downloadDir: config.DOWNLOAD_DIR,
@@ -150,5 +155,5 @@ async function buildAgent(
     if (falkorClient) await falkorClient.close();
   };
 
-  return { orchestrator, analyzer, accounts, downloadDir: config.DOWNLOAD_DIR, stats, cleanup };
+  return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, stats, cleanup };
 }

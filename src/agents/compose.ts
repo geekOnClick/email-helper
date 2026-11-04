@@ -17,6 +17,7 @@ import { registerMailConnectTools, getSharedSessionStore } from '../tools/mail/r
 import { registerVectorTools } from '../tools/vector/register-tools.js';
 import { consoleToolLogger, type ToolLogger } from '../observability/logger.js';
 import type { MailAccount } from '../tools/mail/types.js';
+import type { AccountRegistry } from '../config/account-registry.js';
 import type { CreateMailProviderOptions } from '../tools/mail/providers/factory.js';
 import type { SmtpTransportFactory } from '../tools/mail/smtp-client.js';
 import type { RouterAiClient } from '../llm/routerai-client.js';
@@ -31,8 +32,10 @@ export interface ComposeAgentsOptions {
   client: RouterAiClient;
   /** Конфиг (источник лимитов по умолчанию). */
   config: Config;
-  /** Почтовые аккаунты для регистрации тулa mail.connect. */
+  /** Почтовые аккаунты (для маскирования секретов в observability). */
   accounts: MailAccount[];
+  /** In-memory реестр аккаунтов (источник правды для mail.connect/mail.send). */
+  accountRegistry: AccountRegistry;
   /** Конфиг OAuth2 (MS_CLIENT_ID/MS_TENANT) для Outlook. */
   oauth2?: CreateMailProviderOptions['oauth2'];
   /** Путь к локальному хранилищу OAuth2-токенов. */
@@ -66,7 +69,7 @@ export interface ComposeAgentsOptions {
 export async function composeAgents(opts: ComposeAgentsOptions): Promise<Orchestrator> {
   // 1. Регистрация рутинных тулов на shared-сессии.
   registerMailConnectTools({
-    accounts: opts.accounts,
+    accountRegistry: opts.accountRegistry,
     oauth2: opts.oauth2,
     tokenStorePath: opts.tokenStorePath,
     sessionStore: getSharedSessionStore(),

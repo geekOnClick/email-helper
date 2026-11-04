@@ -10,6 +10,7 @@
  * секреты в результатах и сообщениях ошибок (`mail/redact.ts`).
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { AccountLookupError } from '../tools/mail/account-lookup-error.js';
 
 /** Текстовый блок контента MCP. */
 export interface TextContentBlock {
@@ -23,8 +24,11 @@ export function toMcpResult(result: unknown): CallToolResult {
   return { content: [{ type: 'text', text }] };
 }
 
-/** Ошибка тулa → isError: true с текстом ошибки. */
+/** Ошибка тулa → isError: true с текстом ошибки. AccountLookupError → JSON. */
 export function toMcpError(err: unknown): CallToolResult {
+  if (err instanceof AccountLookupError) {
+    return { content: [{ type: 'text', text: JSON.stringify(err.toMcpJson()) }], isError: true };
+  }
   const text = err instanceof Error ? err.message : String(err);
   return { content: [{ type: 'text', text }], isError: true };
 }

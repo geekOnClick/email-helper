@@ -5,6 +5,7 @@ import { composeAgents } from '../../src/agents/compose.js';
 import { resetTools, listTools } from '../../src/tools/registry.js';
 import { createMcpServer } from '../../src/mcp/adapters.js';
 import { loadConfig } from '../../src/config/loader.js';
+import { AccountRegistry } from '../../src/config/account-registry.js';
 import type { RouterAiClient } from '../../src/llm/routerai-client.js';
 import type { ChatResult } from '../../src/llm/types.js';
 import type { Config } from '../../src/config/schema.js';
@@ -53,6 +54,7 @@ describe('MCP: интеграция с composeAgents (реальные тулы)
       client: stubClient(),
       config: makeConfig(),
       accounts: [],
+      accountRegistry: new AccountRegistry([]),
     });
 
     const client = await connectClient();
@@ -73,6 +75,7 @@ describe('MCP: интеграция с composeAgents (реальные тулы)
       client: stubClient(),
       config: makeConfig(),
       accounts: [],
+      accountRegistry: new AccountRegistry([]),
     });
 
     const client = await connectClient();
@@ -89,17 +92,22 @@ describe('MCP: интеграция с composeAgents (реальные тулы)
       client: stubClient(),
       config: makeConfig(),
       accounts: [],
+      accountRegistry: new AccountRegistry([]),
     });
 
     const client = await connectClient();
     const result = await client.callTool({
       name: 'mail.connect',
-      arguments: { login: 'nonexistent@test.local' },
+      arguments: { login: 'nonexistent@test.local', provider: 'yandex' },
     });
 
-    // Аккаунт не найден → handler выбрасывает → isError: true.
+    // Аккаунт не найден → AccountLookupError → isError: true + структурированный JSON.
     expect(result.isError).toBe(true);
     const textBlock = result.content[0] as { type: 'text'; text: string };
-    expect(textBlock.text).toContain('nonexistent@test.local');
+    const parsed = JSON.parse(textBlock.text);
+    expect(parsed.error).toBe('account_not_found');
+    expect(parsed.login).toBe('nonexistent@test.local');
+    expect(parsed.provider).toBe('yandex');
+    expect(parsed.hint).toContain('/add-account');
   });
 });

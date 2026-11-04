@@ -5,6 +5,7 @@ import { composeAgents } from '../../src/agents/compose.js';
 import { resetTools } from '../../src/tools/registry.js';
 import { getSharedSessionStore } from '../../src/tools/mail/register-tools.js';
 import { loadConfig } from '../../src/config/loader.js';
+import { AccountRegistry } from '../../src/config/account-registry.js';
 import { noopToolLogger } from '../../src/observability/logger.js';
 import type { MailProvider } from '../../src/tools/mail/mail-provider.js';
 import type { MailAccount } from '../../src/tools/mail/types.js';
@@ -92,7 +93,7 @@ describe('E2E CLI guided: /find', () => {
     const io = new MockConsoleIO(['найди письма по проекту X', '/find', 'тема - Проект X', '', '/quit']);
     // Первая строка — свободный текст (отклоняется), затем /find.
     const analyzer = { name: 'analyzer', description: 'stub', run: async () => '' };
-    const repl = new CliRepl({ io, accounts: [ACCOUNT], analyzer, downloadDir: '/tmp' });
+    const repl = new CliRepl({ io, accounts: [ACCOUNT], registry: new AccountRegistry([ACCOUNT]), envPath: '.env.test', analyzer, downloadDir: '/tmp' });
     const exit = await repl.start();
     const out = io.output();
 
@@ -125,7 +126,7 @@ describe('E2E CLI guided: /download', () => {
       '/quit',
     ]);
     const analyzer = { name: 'analyzer', description: 'stub', run: async () => '' };
-    const repl = new CliRepl({ io, accounts: [ACCOUNT], analyzer, downloadDir: tmpDir });
+    const repl = new CliRepl({ io, accounts: [ACCOUNT], registry: new AccountRegistry([ACCOUNT]), envPath: '.env.test', analyzer, downloadDir: tmpDir });
     const exit = await repl.start();
     const out = io.output();
 

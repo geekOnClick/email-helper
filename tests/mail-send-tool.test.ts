@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createMailSendTool, type MailSendResult } from '../src/tools/mail/mail-send.tool.js';
 import { MailSessionStore } from '../src/tools/mail/session-store.js';
+import { AccountRegistry } from '../src/config/account-registry.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
 import type { ComposeMailInput } from '../src/types/email.js';
 import type { SmtpTransport, SmtpSendMailOptions } from '../src/tools/mail/smtp-client.js';
@@ -63,7 +64,7 @@ function makeTool(opts: {
 }) {
   return createMailSendTool({
     sessionStore: opts.store,
-    accounts: opts.accounts ?? [yandexAccount],
+    accountRegistry: new AccountRegistry(opts.accounts ?? [yandexAccount]),
     transportFactory: opts.transportFactory,
   });
 }

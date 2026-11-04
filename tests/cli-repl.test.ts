@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { CliRepl } from '../src/transport/cli/repl.js';
 import { MockConsoleIO } from './mock-io.js';
 import { resetTools } from '../src/tools/registry.js';
+import { AccountRegistry } from '../src/config/account-registry.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
 import type { Subagent } from '../src/agents/subagent.js';
 
@@ -24,7 +25,14 @@ function stubAnalyzer(): Subagent {
 function makeRepl(inputs: string[], accounts: MailAccount[] = [ACCOUNT]) {
   const io = new MockConsoleIO(inputs);
   const analyzer = stubAnalyzer();
-  const repl = new CliRepl({ io, accounts, analyzer, downloadDir: '/tmp' });
+  const repl = new CliRepl({
+    io,
+    accounts,
+    registry: new AccountRegistry(accounts),
+    envPath: '.env.test-not-written',
+    analyzer,
+    downloadDir: '/tmp',
+  });
   return { io, repl, analyzer };
 }
 
@@ -66,6 +74,18 @@ describe('CliRepl: guided-режим', () => {
       const out = io.output();
       expect(out).toContain('Неизвестная команда');
       expect(out).toContain('/find');
+      expect(out).toContain('/add-account');
+    });
+  });
+
+  describe('/add-account', () => {
+    it('запускает мастер заведения аккаунта', async () => {
+      // Пустой ввод в мастере → отмена (без записи), затем /quit.
+      const { io, repl } = makeRepl(['/add-account', '', '/quit']);
+      await repl.start();
+      const out = io.output();
+      expect(out).toContain('Введите данные аккаунта');
+      expect(out).toContain('provider');
     });
   });
 
@@ -89,6 +109,7 @@ describe('CliRepl: guided-режим', () => {
       expect(out).toContain('/download');
       expect(out).toContain('/send');
       expect(out).toContain('/stats');
+      expect(out).toContain('/add-account');
     });
   });
 });

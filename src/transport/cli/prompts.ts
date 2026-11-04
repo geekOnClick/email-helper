@@ -6,7 +6,7 @@
  * Работает через ConsoleIO — тестируем на MockConsoleIO.
  */
 import type { ConsoleIO } from './io.js';
-import type { MailAccount } from '../../tools/mail/types.js';
+import type { MailAccount, MailProviderKind, AuthStrategyKind } from '../../tools/mail/types.js';
 import type { EmailMessage } from '../../types/email.js';
 
 /** Входные критерии поиска (любое подмножество полей). */
@@ -314,4 +314,115 @@ export async function promptConfirm(io: ConsoleIO, question: string): Promise<bo
   if (line === null) return false;
   const answer = line.trim().toLowerCase();
   return answer === 'да' || answer === 'yes' || answer === 'y' || answer === 'д';
+}
+
+// === Мастер заведения аккаунта /add-account (change mcp-env-account-credentials) ===
+
+/** Поля мастера заведения аккаунта. */
+const ADD_ACCOUNT_FIELDS = ['provider', 'login', 'password', 'authStrategy'] as const;
+type AddAccountField = (typeof ADD_ACCOUNT_FIELDS)[number];
+
+/** Допустимые значения provider. */
+const PROVIDERS: readonly MailProviderKind[] = ['yandex', 'outlook'];
+/** Допустимые значения authStrategy. */
+const AUTH_STRATEGIES: readonly AuthStrategyKind[] = ['basic', 'oauth2'];
+
+/** Результат сбора полей аккаунта: валидный MailAccount или null (отмена). */
+export interface AddAccountInput {
+  provider: MailProviderKind;
+  login: string;
+  password: string;
+  authStrategy: AuthStrategyKind;
+}
+
+/** Парсит строку мастера заведения аккаунта. */
+function parseAddAccountLine(line: string): { field: AddAccountField; value: string } | null {
+  const trimmed = line.trim();
+  if (trimmed === '') return null;
+  const sepIdx = trimmed.indexOf(SEPARATOR);
+  if (sepIdx === -1) return null;
+  // НЕ приводим к нижнему регистру: имена полей ASCII camelCase (provider/authStrategy).
+  const field = trimmed.slice(0, sepIdx).trim();
+  const value = trimmed.slice(sepIdx + SEPARATOR.length).trim();
+  if (!ADD_ACCOUNT_FIELDS.includes(field as AddAccountField)) return null;
+  return { field: field as AddAccountField, value };
+}
+
+/** Валидирует значение поля аккаунта. Возвращает null или сообщение об ошибке. */
+function validateAccountField(field: AddAccountField, value: string): string | null {
+  switch (field) {
+    case 'provider': {
+      const v = value.toLowerCase();
+      return PROVIDERS.includes(v as MailProviderKind)
+        ? null
+        : `provider должен быть yandex или outlook, получено: ${value}`;
+    }
+    case 'login':
+      return value.length > 0 ? null : 'login не должен быть пустым';
+    case 'password':
+      return value.length > 0 ? null : 'password не должен быть пустым';
+    case 'authStrategy': {
+      const v = value.toLowerCase();
+      return AUTH_STRATEGIES.includes(v as AuthStrategyKind)
+        ? null
+        : `authStrategy должен быть basic или oauth2, получено: ${value}`;
+    }
+  }
+}
+
+/**
+ * Собирает поля аккаунта в интерактивном мастере /add-account.
+ *
+ * Поля вводятся построчно в формате `ключ - значение` (как остальные guided-команды).
+ * Обязательные: provider, login, password. Опциональный: authStrategy (по умолчанию basic).
+ * Пароль вводится обычным эхо-вводом (без скрытия). Пустая строка завершает сбор:
+ * если введены все обязательные поля — возвращает AddAccountInput, иначе null (отмена).
+ */
+export async function promptAccountFields(io: ConsoleIO): Promise<AddAccountInput | null> {
+  const fields: Partial<Record<AddAccountField, string>> = {};
+  const seen = new Set<AddAccountField>();
+  io.write('Введите данные аккаунта (по одному полю на строку в формате «ключ - значение»):\n');
+  io.write('Обязательные поля: provider (yandex|outlook), login (email), password. Опц.: authStrategy (basic|oauth2). Пустая строка — завершить.\n');
+
+  while (true) {
+    io.write('> ');
+    const line = await io.readline();
+    if (line === null) return finalizeAccount(fields);
+    if (line.trim() === '') return finalizeAccount(fields);
+
+    const parsed = parseAddAccountLine(line);
+    if (!parsed) {
+      io.write('Неверный формат. Используйте «ключ - значение» (напр. «provider - yandex»).\n');
+      continue;
+    }
+    if (seen.has(parsed.field)) {
+      io.write(`Поле «${parsed.field}» уже введено. Пустая строка — завершить.\n`);
+      continue;
+    }
+    const err = validateAccountField(parsed.field, parsed.value);
+    if (err) {
+      io.write(`${err}\n`);
+      continue;
+    }
+    seen.add(parsed.field);
+    // Нормализуем provider/authStrategy к нижнему регистру (пользователь мог ввести Yandex/OAuth2).
+    const normalized =
+      parsed.field === 'provider' || parsed.field === 'authStrategy'
+        ? parsed.value.toLowerCase()
+        : parsed.value;
+    fields[parsed.field] = normalized;
+    io.write(`✓ ${parsed.field}\n`);
+  }
+}
+
+/** Финализирует AddAccountInput или возвращает null при неполном наборе. */
+function finalizeAccount(fields: Partial<Record<AddAccountField, string>>): AddAccountInput | null {
+  const provider = fields.provider as MailProviderKind | undefined;
+  const login = fields.login;
+  const password = fields.password;
+  const authStrategy = (fields.authStrategy as AuthStrategyKind | undefined) ?? 'basic';
+  if (!provider || !login || !password) {
+    return null;
+  }
+  return { provider, login, password, authStrategy };
 }

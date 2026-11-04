@@ -6,13 +6,14 @@ import { createMailFetchTool } from './mail-fetch.tool.js';
 import { createMailDownloadAttachmentsTool } from './mail-download-attachments.tool.js';
 import { createMailSendTool } from './mail-send.tool.js';
 import { MailSessionStore } from './session-store.js';
-import type { MailAccount } from './types.js';
 import type { CreateMailProviderOptions } from './providers/factory.js';
 import type { SmtpTransportFactory } from './smtp-client.js';
 import type { MailOpOptions } from '../../types/email.js';
+import type { AccountRegistry } from '../../config/account-registry.js';
 
 export interface RegisterToolsDeps {
-  accounts: MailAccount[];
+  /** In-memory реестр аккаунтов (источник правды для mail.connect/mail.send). */
+  accountRegistry: AccountRegistry;
   oauth2?: CreateMailProviderOptions['oauth2'];
   tokenStorePath?: string;
   sessionStore?: MailSessionStore;
@@ -33,7 +34,7 @@ export function registerMailConnectTools(deps: RegisterToolsDeps): MailSessionSt
 
   registerTool(
     createMailConnectTool({
-      accounts: deps.accounts,
+      accountRegistry: deps.accountRegistry,
       oauth2: deps.oauth2,
       tokenStorePath: deps.tokenStorePath,
       sessionStore,
@@ -52,7 +53,7 @@ export function registerMailConnectTools(deps: RegisterToolsDeps): MailSessionSt
   registerTool(
     createMailSendTool({
       sessionStore,
-      accounts: deps.accounts,
+      accountRegistry: deps.accountRegistry,
       oauth2: deps.oauth2,
       tokenStorePath: deps.tokenStorePath,
       transportFactory: deps.smtpTransportFactory,

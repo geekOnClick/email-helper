@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createMailConnectTool } from '../src/tools/mail/mail-connect.tool.js';
 import { createMailListFoldersTool } from '../src/tools/mail/mail-list-folders.tool.js';
 import { MailSessionStore } from '../src/tools/mail/session-store.js';
+import { AccountRegistry } from '../src/config/account-registry.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
 
 // Мокаем factory, чтобы не поднимать реальные провайдеры.
@@ -24,18 +25,20 @@ vi.mock('../src/tools/mail/providers/factory.js', () => ({
 }));
 
 describe('mail.connect tool', () => {
-  it('успешный connect для известного аккаунта', async () => {
+  it('успешный connect для известного аккаунта (provider+login)', async () => {
     const store = new MailSessionStore();
-    const tool = createMailConnectTool({ accounts, sessionStore: store });
-    const res = await tool.handler({ login: 'a@yandex.com' });
+    const registry = new AccountRegistry(accounts);
+    const tool = createMailConnectTool({ accountRegistry: registry, sessionStore: store });
+    const res = await tool.handler({ login: 'a@yandex.com', provider: 'yandex' });
     expect(res).toEqual({ connected: true, accountId: 'a@yandex.com', provider: 'yandex' });
     expect(store.has('a@yandex.com')).toBe(true);
   });
 
-  it('ошибка для неизвестного аккаунта', async () => {
+  it('ошибка для неизвестного аккаунта (account_not_found)', async () => {
     const store = new MailSessionStore();
-    const tool = createMailConnectTool({ accounts, sessionStore: store });
-    await expect(tool.handler({ login: 'nope@nope.com' })).rejects.toThrow(/аккаунт не найден/);
+    const registry = new AccountRegistry(accounts);
+    const tool = createMailConnectTool({ accountRegistry: registry, sessionStore: store });
+    await expect(tool.handler({ login: 'nope@nope.com', provider: 'yandex' })).rejects.toThrow(/не найден/);
     expect(store.has('nope@nope.com')).toBe(false);
   });
 });
@@ -43,8 +46,9 @@ describe('mail.connect tool', () => {
 describe('mail.listFolders tool', () => {
   it('со активной сессией возвращает папки', async () => {
     const store = new MailSessionStore();
-    const connectTool = createMailConnectTool({ accounts, sessionStore: store });
-    await connectTool.handler({ login: 'b@outlook.com' });
+    const registry = new AccountRegistry(accounts);
+    const connectTool = createMailConnectTool({ accountRegistry: registry, sessionStore: store });
+    await connectTool.handler({ login: 'b@outlook.com', provider: 'outlook' });
     const listTool = createMailListFoldersTool({ sessionStore: store });
     const folders = await listTool.handler({ login: 'b@outlook.com' });
     expect(Array.isArray(folders)).toBe(true);

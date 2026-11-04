@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { composeAgents } from '../src/agents/compose.js';
 import { resetTools } from '../src/tools/registry.js';
 import { loadConfig } from '../src/config/loader.js';
+import { AccountRegistry } from '../src/config/account-registry.js';
 import type { RouterAiClient } from '../src/llm/routerai-client.js';
 import type { ChatResult } from '../src/llm/types.js';
 import type { Config } from '../src/config/schema.js';
@@ -35,6 +36,7 @@ describe('composeAgents (слой сборки)', () => {
       client: mockClient(),
       config: makeConfig(),
       accounts: [],
+      accountRegistry: new AccountRegistry([]),
     });
     const names = orch.getOpenAiTools().map((t) => t.function.name);
     expect(names).toContain('delegate');
@@ -77,6 +79,7 @@ describe('composeAgents (слой сборки)', () => {
       client: scriptedClient,
       config: makeConfig(),
       accounts: [],
+      accountRegistry: new AccountRegistry([]),
     });
     const res = await orch.run('Подключись к ящику через помощника.');
     expect(res.iterations).toBe(2);

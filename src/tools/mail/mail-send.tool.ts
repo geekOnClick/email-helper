@@ -7,6 +7,7 @@ import { smtpConnectionFor } from './providers/smtp-options.js';
 import { SmtpClient, createDefaultTransport, type SmtpTransportFactory } from './smtp-client.js';
 import { validateComposeMail } from './compose-mail.js';
 import { redact } from './redact.js';
+import type { AccountRegistry } from '../../config/account-registry.js';
 import type {
   ComposeMailInput,
   EmailAddress,
@@ -21,7 +22,8 @@ export interface MailSendArgs {
 
 export interface MailSendDeps {
   sessionStore: MailSessionStore;
-  accounts: MailAccount[];
+  /** In-memory реестр аккаунтов (fallback для SMTP, если сессия уже закрыта). */
+  accountRegistry: AccountRegistry;
   oauth2?: CreateMailProviderOptions['oauth2'];
   tokenStorePath?: string;
   /** Инжектируемая фабрика SMTP-транспорта (тесты). По умолчанию — nodemailer. */
@@ -110,7 +112,7 @@ export function createMailSendTool(deps: MailSendDeps): ToolDef<MailSendArgs> {
       }
 
       const provider = deps.sessionStore.get(login);
-      const account = deps.sessionStore.getAccount(login) ?? deps.accounts.find((a) => a.login === login);
+      const account = deps.sessionStore.getAccount(login) ?? deps.accountRegistry.findByLogin(login);
       if (!provider || !account) {
         throw new ConnectError(`mail.send: подключение не установлено для ${login}`);
       }
