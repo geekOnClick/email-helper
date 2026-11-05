@@ -16,6 +16,7 @@ import {
   runAnalyzeManyCommand,
   runAnalyzeAttachmentsCommand,
   runSmartSendCommand,
+  runSmartSearchCommand,
 } from './commands/index.js';
 import { runAddAccountCommand } from './commands/add-account.js';
 import type { RouterAiClient } from '../../llm/routerai-client.js';
@@ -44,6 +45,8 @@ export interface GuidedCommandDeps {
   llmClient: RouterAiClient;
   /** Потолок числа писем для /analyze-many (ANALYZE_MANY_MAX_EMAILS). */
   analyzeManyMaxEmails?: number;
+  /** Окно bounded-поиска (дней) для /smart-search без явной даты (MAIL_SEARCH_FALLBACK_DAYS). */
+  fallbackDays?: number;
   /** Папка для временных файлов /analyze-attachments (по умолчанию os.tmpdir()). */
   tmpDir?: string;
 }
@@ -67,6 +70,7 @@ export class CliRepl {
   private readonly analyzer: Subagent;
   private readonly llmClient: RouterAiClient;
   private readonly analyzeManyMaxEmails?: number;
+  private readonly fallbackDays?: number;
   private readonly tmpDir?: string;
   private readonly stats: SessionStats;
   private running = false;
@@ -79,6 +83,7 @@ export class CliRepl {
     this.analyzer = opts.analyzer;
     this.llmClient = opts.llmClient;
     this.analyzeManyMaxEmails = opts.analyzeManyMaxEmails;
+    this.fallbackDays = opts.fallbackDays;
     this.tmpDir = opts.tmpDir;
     this.stats = opts.stats ?? new SessionStats();
   }
@@ -111,7 +116,7 @@ export class CliRepl {
       // Не-slash текст — отклоняется.
       if (!trimmed.startsWith('/')) {
         this.io.write(
-          'Доступен только slash-командный режим. Введите /analyze, /analyze-many, /analyze-attachments, /smart-send, /stats или /quit.\n',
+          'Доступен только slash-командный режим. Введите /analyze, /analyze-many, /analyze-attachments, /smart-send, /smart-search, /stats или /quit.\n',
         );
         continue;
       }
@@ -195,6 +200,17 @@ export class CliRepl {
           }),
         );
         return false;
+      case '/smart-search':
+        await this.runSafe(() =>
+          runSmartSearchCommand({
+            io: this.io,
+            accounts: this.registry.list(),
+            llmClient: this.llmClient,
+            maxEmails: this.analyzeManyMaxEmails,
+            fallbackDays: this.fallbackDays,
+          }),
+        );
+        return false;
       case '/add-account':
         await this.runSafe(() =>
           runAddAccountCommand({
@@ -207,7 +223,7 @@ export class CliRepl {
       default:
         this.io.write(
           formatError(
-            `Неизвестная команда: ${command}. Доступные: /analyze, /analyze-many, /analyze-attachments, /smart-send, /add-account, /stats, /quit.`,
+            `Неизвестная команда: ${command}. Доступные: /analyze, /analyze-many, /analyze-attachments, /smart-send, /smart-search, /add-account, /stats, /quit.`,
             this.io.isTTY(),
           ) + '\n',
         );

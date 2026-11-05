@@ -360,6 +360,31 @@ export async function promptSendAction(io: ConsoleIO): Promise<SendAction> {
   }
 }
 
+// === Мастер /smart-search (change cli-smart-search) ===
+
+/** Входные данные /smart-search: произвольный промпт естественным языком. */
+export interface SmartSearchInput {
+  /** Произвольный промпт (например «найди последнее письмо от ded@ded.ru»). */
+  prompt: string;
+}
+
+/**
+ * Запрашивает промпт одной строкой для /smart-search.
+ *
+ * Пользователь вводит произвольный промпт естественным языком; система НЕ
+ * требует структурированных полей (тема/отправитель/даты) — разбор промпта в
+ * критерии выполняется моделью (см. требование «Команда /smart-search»). При
+ * пустом вводе (или только пробелах) → отмена (null).
+ */
+export async function promptSmartSearchPrompt(io: ConsoleIO): Promise<SmartSearchInput | null> {
+  io.write('Введите промпт для поиска писем (например «найди последнее письмо от ded@ded.ru»):\n> ');
+  const line = await io.readline();
+  if (line === null) return null;
+  const prompt = line.trim();
+  if (prompt === '') return null;
+  return { prompt };
+}
+
 // === Мастер заведения аккаунта /add-account (change mcp-env-account-credentials) ===
 
 /** Поля мастера заведения аккаунта. */

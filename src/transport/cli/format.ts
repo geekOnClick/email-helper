@@ -111,6 +111,7 @@ export function formatCommandHelp(useColor = true): string {
     cmd('/analyze-many', 'поиск и批量-анализ писем + общий смысл'),
     cmd('/analyze-attachments', 'найти письмо и проанализировать вложения'),
     cmd('/smart-send', 'сгенерировать и отправить письмо по промпту'),
+    cmd('/smart-search', 'найти письмо по промпту естественным языком'),
     cmd('/add-account', 'завести/обновить почтовый аккаунт в .env'),
     cmd('/stats', 'статистика сессии (прогоны, тулы, токены)'),
     cmd('/quit', 'завершить сессию'),
@@ -153,6 +154,36 @@ export function formatDraft(draft: DraftEmail, useColor = true): string {
   lines.push(`Тема: ${draft.subject}`);
   lines.push('');
   lines.push(draft.text);
+  lines.push(sep);
+  return lines.join('\n');
+}
+
+/** Полное входящее письмо для отображения (с телом, без LLM-анализа). */
+export interface FullEmailView {
+  uid: number;
+  subject: string;
+  from?: { name?: string; address: string };
+  date: Date;
+  body: string;
+}
+
+/**
+ * Форматирует полное входящее письмо для просмотра в терминале (отправитель,
+ * тема, дата, UID, тело) — визуально-обособленный блок, как `formatDraft`, но
+ * для чтения найденного письма. Без LLM-анализа (change cli-smart-search).
+ */
+export function formatEmailFull(email: FullEmailView, useColor = true): string {
+  const label = color('Письмо', ANSI.cyan, useColor);
+  const sep = color('─'.repeat(40), ANSI.dim, useColor);
+  const from = formatSender(email.from);
+  const date = email.date.toISOString().slice(0, 10);
+  const lines: string[] = [sep, label, sep];
+  lines.push(`UID: ${email.uid}`);
+  lines.push(`От: ${from}`);
+  lines.push(`Тема: ${email.subject}`);
+  lines.push(`Дата: ${date}`);
+  lines.push('');
+  lines.push(email.body);
   lines.push(sep);
   return lines.join('\n');
 }

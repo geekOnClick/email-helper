@@ -120,6 +120,7 @@ describe('CliRepl: guided-режим', () => {
       expect(out).toContain('/analyze-many');
       expect(out).toContain('/analyze-attachments');
       expect(out).toContain('/smart-send');
+      expect(out).toContain('/smart-search');
       expect(out).toContain('/stats');
       expect(out).toContain('/add-account');
     });

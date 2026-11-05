@@ -59,6 +59,12 @@ describe('CliRepl: маршруты новых команд', () => {
     expect(io.output()).toContain('Отправка отменена');
   });
 
+  it('/smart-search → запуск мастера (отмена пустым промптом)', async () => {
+    const { io, repl } = makeRepl(['/smart-search', '', '/quit']);
+    await repl.start();
+    expect(io.output()).toContain('Поиск отменён');
+  });
+
   it('убранные команды /find, /find-all, /download, /send → сообщение об уборке', async () => {
     for (const cmd of ['/find', '/find-all', '/download', '/send']) {
       const { io, repl } = makeRepl([cmd, '/quit']);
@@ -74,6 +80,7 @@ describe('CliRepl: маршруты новых команд', () => {
     expect(out).toContain('/analyze-many');
     expect(out).toContain('/analyze-attachments');
     expect(out).toContain('/smart-send');
+    expect(out).toContain('/smart-search');
     // убранные команды не упоминаются в справке.
     expect(out).not.toContain('/find-all');
   });
