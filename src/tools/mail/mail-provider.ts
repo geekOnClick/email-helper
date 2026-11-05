@@ -76,6 +76,22 @@ export interface MailProvider {
     targetDir: string,
     options?: { folder?: string; names?: string[] } & Partial<MailOpOptions>,
   ): Promise<DownloadResult>;
+  /**
+   * Пригодно ли соединение для использования без сетевых операций.
+   * Возвращает `true` только если клиент инициирован и нижележащее
+   * соединение пригодно (imapflow `client.usable === true`). Толерантен к
+   * `client === null` (возвращает `false`). Используется для proactive-проверки
+   * живости перед операцией и прозрачного переподключения (change
+   * mail-connection-self-healing).
+   */
+  isConnectionUsable(): boolean;
+  /**
+   * Прозрачное переподключение: закрытие старого client и новое подключение
+   * через существующий lifecycle, без изменения учётных данных аккаунта.
+   * Используется для поднятия упавшего в простое соединения перед операцией.
+   * Не реентерабелен — не вызывать параллельно с операциями.
+   */
+  reconnect(): Promise<void>;
   /** Закрытие сессии, освобождение соединения. */
   dispose(): Promise<void>;
 }

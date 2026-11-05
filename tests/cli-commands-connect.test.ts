@@ -13,7 +13,8 @@ const ACCOUNT: MailAccount = {
   authStrategy: 'basic',
 };
 
-function stubProvider(): MailProvider {
+function stubProvider(opts: { usable?: boolean; reconnectImpl?: () => Promise<void> } = {}): MailProvider {
+  const usable = opts.usable ?? true;
   return {
     connect: async () => ({ ok: true, login: ACCOUNT.login }),
     listFolders: async () => [],
@@ -21,6 +22,8 @@ function stubProvider(): MailProvider {
     fetch: async () => ({}),
     downloadAttachments: async () => ({ paths: [], folder: 'INBOX', uid: 0 }),
     dispose: async () => {},
+    isConnectionUsable: () => usable,
+    reconnect: opts.reconnectImpl ?? (async () => {}),
   } as unknown as MailProvider;
 }
 
@@ -96,5 +99,67 @@ describe('ensureMailConnected', () => {
     const ok = await ensureMailConnected(io, ACCOUNT);
     expect(ok).toBe(false);
     expect(io.output()).toContain('mail.connect');
+  });
+
+  it('сессия пригодна → true без переподключения (reconnect не вызывается)', async () => {
+    const store = getSharedSessionStore();
+    let reconnectCalled = false;
+    store.set(
+      ACCOUNT,
+      stubProvider({
+        usable: true,
+        reconnectImpl: async () => {
+          reconnectCalled = true;
+        },
+      }),
+    );
+
+    const io = new MockConsoleIO([]);
+    const ok = await ensureMailConnected(io, ACCOUNT);
+    expect(ok).toBe(true);
+    expect(reconnectCalled).toBe(false);
+    expect(io.output()).not.toContain('Переподключение');
+  });
+
+  it('мёртвая сессия → прозрачное переподключение, true при успехе', async () => {
+    const store = getSharedSessionStore();
+    let reconnectCalled = false;
+    store.set(
+      ACCOUNT,
+      stubProvider({
+        usable: false,
+        reconnectImpl: async () => {
+          reconnectCalled = true;
+        },
+      }),
+    );
+
+    const io = new MockConsoleIO([]);
+    const ok = await ensureMailConnected(io, ACCOUNT);
+    expect(ok).toBe(true);
+    expect(reconnectCalled).toBe(true);
+    const out = io.output();
+    expect(out).toContain('Переподключение');
+    expect(out).toContain('Подключено');
+  });
+
+  it('мёртвая сессия + reconnect падает → false и сообщение об ошибке переподключения', async () => {
+    const store = getSharedSessionStore();
+    store.set(
+      ACCOUNT,
+      stubProvider({
+        usable: false,
+        reconnectImpl: async () => {
+          throw new Error('network down');
+        },
+      }),
+    );
+
+    const io = new MockConsoleIO([]);
+    const ok = await ensureMailConnected(io, ACCOUNT);
+    expect(ok).toBe(false);
+    const out = io.output();
+    expect(out).toContain('Ошибка переподключения');
+    expect(out).toContain('network down');
   });
 });

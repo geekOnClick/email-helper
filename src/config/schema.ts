@@ -54,7 +54,7 @@ export const ConfigSchema = z.object({
   // Общий таймаут одной попытки для всех IMAP-тулов (search/fetch/downloadAttachments/listFolders).
   MAIL_OP_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
   // Число повторов с переподключением при сетевом обрыве/таймауте.
-  MAIL_OP_MAX_RETRIES: z.coerce.number().int().nonnegative().default(1),
+  MAIL_OP_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
   // SINCE по умолчанию (в днях) для subject-only поиска — bounded client-side фолбэкк.
   MAIL_SEARCH_FALLBACK_DAYS: z.coerce.number().int().positive().default(180),
   // === Команды CLI (cli-smart-commands) ===

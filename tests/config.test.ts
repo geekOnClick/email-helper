@@ -38,6 +38,18 @@ describe('loadConfig', () => {
   });
 });
 
+describe('MAIL_OP_MAX_RETRIES default (mail-connection-self-healing)', () => {
+  it('дефолт = 2, если не задан в env', () => {
+    const cfg = loadConfig({ ROUTERAI_API_KEY: 'test-key' });
+    expect(cfg.MAIL_OP_MAX_RETRIES).toBe(2);
+  });
+
+  it('переопределяется из env', () => {
+    const cfg = loadConfig({ ROUTERAI_API_KEY: 'test-key', MAIL_OP_MAX_RETRIES: '3' });
+    expect(cfg.MAIL_OP_MAX_RETRIES).toBe(3);
+  });
+});
+
 describe('parseAccounts', () => {
   it('парсит валидный массив аккаунтов', () => {
     const accounts = parseAccounts(

@@ -27,6 +27,8 @@ function seedSession(account: MailAccount = ACCOUNT): void {
     fetch: async () => ({}),
     downloadAttachments: async () => ({ paths: [], folder: 'INBOX', uid: 0 }),
     dispose: async () => {},
+    isConnectionUsable: () => true,
+    reconnect: async () => {},
   } as unknown as MailProvider);
 }
 

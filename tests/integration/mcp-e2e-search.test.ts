@@ -57,6 +57,8 @@ function stubProvider(): MailProvider {
     fetch: async (uid: number): Promise<EmailFull> => ({ ...full, uid }),
     downloadAttachments: async () => ({}) as never,
     dispose: async () => {},
+    isConnectionUsable: () => true,
+    reconnect: async () => {},
   };
 }
 

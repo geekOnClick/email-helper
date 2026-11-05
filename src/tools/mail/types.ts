@@ -42,6 +42,8 @@ export interface ConnectionResult {
  * Сужение реального ImapFlow до реально используемых методов — для моков в тестах.
  */
 export interface ImapClient {
+  /** Пригодно ли соединение для использования (false после разрыва/закрытия). */
+  usable: boolean;
   connect(): Promise<void>;
   logout(): Promise<void>;
   list(options?: { status?: boolean }): Promise<ListResponse[]>;

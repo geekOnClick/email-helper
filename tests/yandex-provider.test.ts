@@ -118,12 +118,15 @@ describe('YandexMailProvider', () => {
     await expect(p.connect()).rejects.toThrow(/закрыт/);
   });
 
-  it('после dispose операции выбрасывают «подключение не установлено»', async () => {
+  it('после dispose операции выбрасывают «провайдер закрыт» (reconnect невозможен — account обнулён)', async () => {
     const { factory } = makeFactory({});
     const p = new YandexMailProvider({ account, clientFactory: factory });
     await p.connect();
     await p.dispose();
-    await expect(p.listFolders()).rejects.toThrow(/подключение не установлено/);
-    await expect(p.search({ subject: 'x' })).rejects.toThrow(/подключение не установлено|закрыт/);
+    // После dispose account === null → requireClient бросает «подключение не установлено»
+    // → теперь это connection-ошибка (D4) → retry → reconnect → tryConnect →
+    // requireAccount бросает «провайдер закрыт». Итог: операция падает с «провайдер закрыт».
+    await expect(p.listFolders()).rejects.toThrow(/провайдер закрыт|подключение не установлено/);
+    await expect(p.search({ subject: 'x' })).rejects.toThrow(/провайдер закрыт|подключение не установлено|закрыт/);
   });
 });

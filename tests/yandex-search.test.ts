@@ -149,10 +149,13 @@ describe('YandexMailProvider.search', () => {
     }
   });
 
-  it('поиск без подключения бросает', async () => {
+  it('поиск без подключения → прозрачное переподключение (self-healing) → пустой результат', async () => {
     const factory = makeFactory({ uids: [], rows: [] });
     const p = new YandexMailProvider({ account, clientFactory: factory });
-    // не вызываем connect
-    await expect(p.search({ subject: 'x' })).rejects.toThrow(/подключение не установлено/);
+    // Без connect(): requireClient бросает «подключение не установлено» → теперь
+    // connection-ошибка (D4) → retry → reconnect (tryConnect) → поиск.
+    // uids=[] → пустой результат без ошибок.
+    const result = await p.search({ subject: 'x' });
+    expect(result.messages).toEqual([]);
   });
 });

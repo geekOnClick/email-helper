@@ -128,9 +128,12 @@ describe('YandexMailProvider.fetch', () => {
     }
   });
 
-  it('без сессии — ошибка', async () => {
+  it('без сессии — прозрачное переподключение (self-healing), затем операция', async () => {
     const factory = makeFactory({ rows: [] });
     const p = new YandexMailProvider({ account, clientFactory: factory });
-    await expect(p.fetch(1)).rejects.toThrow(/подключение не установлено/);
+    // Без connect(): requireClient бросает «подключение не установлено» → теперь
+    // connection-ошибка (D4) → retry → reconnect (tryConnect) → операция.
+    // fetch(1) с пустыми rows → «письмо 1 не найдено» (логическая ошибка, не сеть).
+    await expect(p.fetch(1)).rejects.toThrow(/письмо 1 не найдено|подключение не установлено/);
   });
 });

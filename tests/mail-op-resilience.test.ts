@@ -70,11 +70,16 @@ describe('AbstractImapProvider: timeout + retry (mail-search-robustness)', () =>
     expect(client.logout).not.toHaveBeenCalled();
   });
 
-  it('«подключение не установлено» — не connection, без retry', async () => {
-    const { factory } = makeFactory();
+  it('«подключение не установлено» — connection-ошибка, retry с reconnect (mail-connection-self-healing D4)', async () => {
+    const { factory, client } = makeFactory();
     const p = new YandexMailProvider({ account, clientFactory: factory });
-    // не вызываем connect
-    await expect(p.listFolders()).rejects.toThrow(/подключение не установлено/);
+    // не вызываем connect — requireClient() бросит «подключение не установлено».
+    // Теперь это connection-ошибка → retry тратит попытку на reconnect (tryConnect)
+    // и повторяет; при успехе reconnect возвращает результат.
+    const folders = await p.listFolders({ maxRetries: 1, timeoutMs: 5000 });
+    expect(folders.length).toBeGreaterThan(0);
+    // reconnect вызвал connect фабрики.
+    expect(client.connect).toHaveBeenCalled();
   });
 
   // === таймаут ===

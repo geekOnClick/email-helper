@@ -405,7 +405,6 @@ export abstract class AbstractImapProvider implements MailProvider {
   protected isConnectionError(err: unknown): boolean {
     if (err instanceof ConnectError) {
       const msg = err.message.toLowerCase();
-      if (msg.includes('подключение не установлено')) return false;
       // ошибки аутентификации — не connection (retry не поможет)
       if (msg.includes('auth') && msg.includes('fail')) return false;
       // «письмо N не найдено» — логическая ошибка, не сеть
@@ -413,6 +412,7 @@ export abstract class AbstractImapProvider implements MailProvider {
     }
     const msg = String((err as { message?: string })?.message ?? err).toLowerCase();
     if (msg.includes('timeout') || msg.includes('превышен таймаут')) return true;
+    if (msg.includes('подключение не установлено')) return true;
     return [
       'connection not available',
       'econnreset',
@@ -432,8 +432,12 @@ export abstract class AbstractImapProvider implements MailProvider {
    * Мягкий reconnect для retry: закрывает старый client (logout) и открывает новый
    * через tryConnect, НЕ обнуляя this.account (design D3). После reconnect
    * операция повторяется.
+   *
+   * Публичный (change mail-connection-self-healing): внешние потребители
+   * (guided-команды CLI, SessionStore) могут прозрачно поднять упавшее в простое
+   * соединение до операции. Не реентерабелен — не вызывать параллельно с операциями.
    */
-  protected async reconnect(): Promise<void> {
+  async reconnect(): Promise<void> {
     const oldClient = this.client;
     this.client = null;
     if (oldClient) {
@@ -533,6 +537,16 @@ export abstract class AbstractImapProvider implements MailProvider {
       );
     }
     return this.client;
+  }
+
+  /**
+   * Пригодно ли соединение для использования без сетевых операций (change
+   * mail-connection-self-healing). Возвращает `true` только если клиент
+   * инициирован и нижележащее соединение пригодно (imapflow `client.usable ===
+   * true`). Толерантен к `this.client === null` (возвращает `false`).
+   */
+  isConnectionUsable(): boolean {
+    return this.client !== null && this.client.usable === true;
   }
 
   /** Аккаунт активной (не disposed) сессии. Бросает, если провайдер закрыт. */
