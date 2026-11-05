@@ -330,3 +330,123 @@ describe('AbstractImapProvider: серверный search вернул false (о
     expect(result.messages).toEqual([]);
   });
 });
+
+describe('AbstractImapProvider: сервер багует на before в AND-комбинации (Mail.ru)', () => {
+  /**
+   * IMAP-сервер Mail.ru багует: AND-комбинация `before` с `from`/`subject`
+   * возвращает пустой результат, хотя по отдельности `from`, `since`, `before`,
+   * `subject` надёжны. Раньше fallback `buildNarrowedQuery` тоже отправлял `before`
+   * → попадал в тот же баг → «Ничего не найдено» для существующих писем.
+   * Фикс: fallback НЕ отправляет `before` на сервер (только since/from/to/флаги);
+   * `before` применяется локально в `matchesCriteria`.
+   */
+  function makeMailRuBugFactory(opts: { messages?: typeof MESSAGES }): ImapClientFactory {
+    const messages = opts.messages ?? MESSAGES;
+    return () =>
+      ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([INBOX]),
+        mailboxOpen: vi.fn().mockResolvedValue(undefined),
+        // Имитация бага Mail.ru: любой запрос с `before` + (from|subject) → []
+        // (сервер возвращает пусто). Запросы без before — надёжны.
+        search: vi.fn().mockImplementation((query: Record<string, unknown>) => {
+          const hasBefore = query.before !== undefined;
+          const hasFromOrSubject = query.from !== undefined || query.subject !== undefined;
+          if (hasBefore && hasFromOrSubject) return Promise.resolve([]); // баг Mail.ru
+          let uids = messages.map((m) => m.uid);
+          if (query.subject !== undefined) {
+            const s = String(query.subject).toLowerCase();
+            uids = uids.filter((uid) => {
+              const m = messages.find((mm) => mm.uid === uid);
+              return (m?.envelope.subject ?? '').toLowerCase().includes(s);
+            });
+          }
+          if (query.from !== undefined) {
+            const f = String(query.from).toLowerCase();
+            uids = uids.filter((uid) => {
+              const m = messages.find((mm) => mm.uid === uid);
+              return (
+                m?.envelope.from?.[0]?.address?.toLowerCase().includes(f) === true ||
+                m?.envelope.from?.[0]?.name?.toLowerCase().includes(f) === true
+              );
+            });
+          }
+          if (query.since !== undefined) {
+            const since = query.since instanceof Date ? query.since : new Date(query.since as string);
+            uids = uids.filter((uid) => {
+              const m = messages.find((mm) => mm.uid === uid);
+              return (m?.internalDate ?? new Date(0)) >= since;
+            });
+          }
+          if (query.before !== undefined) {
+            const before = query.before instanceof Date ? query.before : new Date(query.before as string);
+            uids = uids.filter((uid) => {
+              const m = messages.find((mm) => mm.uid === uid);
+              return (m?.internalDate ?? new Date(0)) < before;
+            });
+          }
+          return Promise.resolve(uids);
+        }),
+        fetchAll: vi.fn().mockImplementation((range: string) => {
+          const uids = range.split(',').map((n) => Number(n));
+          const filtered = messages.filter((m) => uids.includes(m.uid));
+          return Promise.resolve(filtered);
+        }),
+        logout: vi.fn().mockResolvedValue(undefined),
+      }) as never;
+  }
+
+  it('subject + from + since + before → основной запрос пуст (баг), fallback без before находит', async () => {
+    // Воспроизводит сценарий бага: полный запрос с before → [] (баг Mail.ru),
+    // fallback (from + since, БЕЗ before) → находит UID, локальная дофильтровка
+    // по before отсекает лишнее, остаётся нужное письмо.
+    const provider = new YandexMailProvider({ account, clientFactory: makeMailRuBugFactory({}) });
+    await provider.connect();
+    const result = await provider.search({
+      subject: 'Нормоконтроль',
+      from: 'Kozloww1508@yandex.ru',
+      since: '2026-10-02',
+      before: '2026-10-03',
+    } as SearchCriteria);
+    // uid=2 (Нормоконтроль, 2026-10-02, от Kozloww1508) должен найтись
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.uid).toBe(2);
+  });
+
+  it('from + since + before → fallback без before находит, локальная фильтрация по before отсекает', async () => {
+    // Только from + даты: основной запрос (from+since+before) → [] (баг Mail.ru),
+    // fallback (from + since, без before) → возвращает письма с этой даты и позже,
+    // локальный before отсекает всё после 2026-10-02. Должно остаться uid=2.
+    const provider = new YandexMailProvider({ account, clientFactory: makeMailRuBugFactory({}) });
+    await provider.connect();
+    const result = await provider.search({
+      from: 'Kozloww1508@yandex.ru',
+      since: '2026-10-02',
+      before: '2026-10-03',
+    } as SearchCriteria);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.uid).toBe(2);
+  });
+
+  it('fallback НЕ отправляет before на сервер (проверка query, уходящего во 2-й search)', async () => {
+    // Перехватываем запросы ко 2-му search (fallback) и убеждаемся, что в нём нет before.
+    const f = makeMailRuBugFactory({});
+    const provider = new YandexMailProvider({ account, clientFactory: f });
+    await provider.connect();
+    await provider.search({
+      subject: 'Нормоконтроль',
+      from: 'Kozloww1508@yandex.ru',
+      since: '2026-10-02',
+      before: '2026-10-03',
+    } as SearchCriteria);
+    const client = (provider as unknown as { client: { search: ReturnType<typeof vi.fn> } }).client;
+    // 1-й вызов — полный запрос (с before), 2-й — fallback (без before)
+    expect(client.search.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const fallbackQuery = client.search.mock.calls[1]?.[0] as Record<string, unknown>;
+    expect(fallbackQuery).toBeDefined();
+    expect(fallbackQuery.before).toBeUndefined();
+    // но from и since присутствуют
+    expect(fallbackQuery.from).toBe('Kozloww1508@yandex.ru');
+    expect(fallbackQuery.since).toBeDefined();
+  });
+});

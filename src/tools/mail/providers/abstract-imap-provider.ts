@@ -210,20 +210,23 @@ export abstract class AbstractImapProvider implements MailProvider {
 
   /**
    * Суженный серверный запрос для fallback (design D1): берёт надёжные критерии
-   * (since/before/from/to/флаги) без subject. Если надёжных нет — добавляет
-   * SINCE = now - fallbackDays, чтобы не фетчить весь ящик.
+   * (since/from/to/флаги) без subject и без before.
+   *
+   * `before` намеренно НЕ отправляется на сервер: IMAP-сервер Mail.ru багует на
+   * AND-комбинации `before` с `from`/`subject` (возвращает пусто даже при
+   * совпадениях), а Яндекс/Outlook это не вредит — `before` применяется локально
+   * в `matchesCriteria`. `since` остаётся (он надёжен и ограничивает набор).
    */
   protected buildNarrowedQuery(criteria: SearchCriteria, fallbackDays: number): SearchObject {
     const q: SearchObject = {};
     if (criteria.from) q.from = criteria.from;
     if (criteria.to) q.to = criteria.to;
     if (criteria.since) q.since = new Date(criteria.since);
-    if (criteria.before) q.before = new Date(criteria.before);
     if (criteria.unseen === true) q.seen = false;
     if (criteria.flagged === true) q.flagged = true;
     if (criteria.answered === true) q.answered = true;
     // нет надёжных критериев → SINCE по умолчанию (bounded fallback)
-    if (!q.from && !q.to && !q.since && !q.before && q.seen === undefined && q.flagged === undefined && q.answered === undefined) {
+    if (!q.from && !q.to && !q.since && q.seen === undefined && q.flagged === undefined && q.answered === undefined) {
       const since = new Date();
       since.setDate(since.getDate() - fallbackDays);
       q.since = since;

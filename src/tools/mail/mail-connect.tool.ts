@@ -36,12 +36,12 @@ export interface MailConnectDeps {
 export function createMailConnectTool(deps: MailConnectDeps): ToolDef<MailConnectArgs> {
   return {
     name: 'mail.connect',
-    description: 'Подключение к почтовому ящику по IMAP (Яндекс, Outlook). Пароль берётся из .env сервера по паре provider+login.',
+    description: 'Подключение к почтовому ящику по IMAP (Яндекс, Outlook, Mail.ru). Пароль берётся из .env сервера по паре provider+login.',
     inputSchema: {
       type: 'object',
       properties: {
         login: { type: 'string', description: 'логин аккаунта' },
-        provider: { type: 'string', enum: ['yandex', 'outlook'], description: 'провайдер ящика' },
+        provider: { type: 'string', enum: ['yandex', 'outlook', 'mail'], description: 'провайдер ящика' },
       },
       required: ['login', 'provider'],
     },
@@ -51,9 +51,9 @@ export function createMailConnectTool(deps: MailConnectDeps): ToolDef<MailConnec
         throw new ConnectError('mail.connect: требуется параметр login');
       }
       const provider = args.provider;
-      if (provider !== 'yandex' && provider !== 'outlook') {
+      if (provider !== 'yandex' && provider !== 'outlook' && provider !== 'mail') {
         throw new ConnectError(
-          `mail.connect: невалидный provider: ${String(provider)} (ожидается yandex|outlook)`,
+          `mail.connect: невалидный provider: ${String(provider)} (ожидается yandex|outlook|mail)`,
         );
       }
 

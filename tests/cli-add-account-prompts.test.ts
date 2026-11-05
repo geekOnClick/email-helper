@@ -41,7 +41,22 @@ describe('promptAccountFields (мастер /add-account)', () => {
     ]);
     const result = await promptAccountFields(io);
     expect(result?.provider).toBe('yandex');
-    expect(io.output()).toContain('provider должен быть yandex или outlook');
+    expect(io.output()).toContain('provider должен быть yandex, outlook или mail');
+  });
+
+  it('валидный provider=mail принимается', async () => {
+    const io = new MockConsoleIO([
+      'provider - mail',
+      'login - user@mail.ru',
+      'password - app-pwd',
+      '',
+    ]);
+    const result = await promptAccountFields(io);
+    expect(result).not.toBeNull();
+    expect(result?.provider).toBe('mail');
+    expect(result?.login).toBe('user@mail.ru');
+    expect(result?.password).toBe('app-pwd');
+    expect(result?.authStrategy).toBe('basic');
   });
 
   it('пустой login — повтор ввода', async () => {

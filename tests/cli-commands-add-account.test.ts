@@ -123,7 +123,7 @@ describe('runAddAccountCommand (/add-account)', () => {
     await runAddAccountCommand({ io, registry, envPath: envPath() });
 
     expect(registry.has('user@yandex.com')).toBe(true);
-    expect(io.output()).toContain('provider должен быть yandex или outlook');
+    expect(io.output()).toContain('provider должен быть yandex, outlook или mail');
   });
 
   it('отмена при пустом вводе сразу → null, без записи', async () => {

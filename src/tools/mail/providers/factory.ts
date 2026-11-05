@@ -4,6 +4,7 @@ import type { MailAccount } from '../types.js';
 import { BasicAuthStrategy } from './basic-auth.js';
 import { YandexMailProvider } from './yandex.js';
 import { OutlookMailProvider, makeOAuth2Strategy } from './outlook.js';
+import { MailRuMailProvider } from './mail-ru.js';
 import { OAuth2MsalStrategy, type OAuth2Config } from './oauth2-msal.js';
 import { OAuthTokenStore } from '../oauth/token-store.js';
 import { MSDeviceFlowClient, type FetchLike } from '../oauth/device-flow.js';
@@ -31,6 +32,10 @@ export function createMailProvider(
 ): MailProvider {
   if (account.provider === 'yandex') {
     return new YandexMailProvider({ account, clientFactory: opts.clientFactory });
+  }
+
+  if (account.provider === 'mail') {
+    return new MailRuMailProvider({ account, clientFactory: opts.clientFactory });
   }
 
   if (account.provider === 'outlook') {
@@ -77,6 +82,9 @@ export function createAuthStrategyForAccount(
   opts: CreateMailProviderOptions = {},
 ): AuthStrategy {
   if (account.provider === 'yandex') {
+    return new BasicAuthStrategy();
+  }
+  if (account.provider === 'mail') {
     return new BasicAuthStrategy();
   }
   if (account.provider === 'outlook') {

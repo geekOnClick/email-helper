@@ -105,6 +105,26 @@ login: 'u@outlook.com',
     expect(acc.authStrategy).toBe('oauth2');
   });
 
+  it('AccountSchema принимает provider=mail (Mail.ru Group)', () => {
+    const acc = AccountSchema.parse({
+      provider: 'mail',
+      login: 'u@mail.ru',
+      password: 'p',
+      authStrategy: 'basic',
+    });
+    expect(acc.provider).toBe('mail');
+  });
+
+  it('AccountSchema отвергает неизвестный provider', () => {
+    const bad = AccountSchema.safeParse({
+      provider: 'gmail',
+      login: 'u@gmail.com',
+      password: 'p',
+      authStrategy: 'basic',
+    });
+    expect(bad.success).toBe(false);
+  });
+
   it('AccountSchema отвергает неизвестную authStrategy', () => {
     const bad = AccountSchema.safeParse({
       provider: 'outlook',

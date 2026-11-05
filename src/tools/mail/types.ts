@@ -10,7 +10,7 @@ import type {
 import type { Account, AuthStrategy } from '../../config/schema.js';
 
 /** Тип провайдера почты. */
-export type MailProviderKind = 'yandex' | 'outlook';
+export type MailProviderKind = 'yandex' | 'outlook' | 'mail';
 
 /** Учётная запись почтового аккаунта (расширенный Account из конфига). */
 export type MailAccount = Account;

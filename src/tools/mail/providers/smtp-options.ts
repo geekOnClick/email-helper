@@ -15,9 +15,17 @@ export const OUTLOOK_SMTP: SmtpConnectionOptions = {
   secure: false,
 };
 
+/** SMTP-параметры Mail.ru Group: smtp.mail.ru:465, неявный TLS. */
+export const MAIL_RU_SMTP: SmtpConnectionOptions = {
+  host: 'smtp.mail.ru',
+  port: 465,
+  secure: true,
+};
+
 /**
  * Возвращает параметры SMTP-соединения по типу провайдера.
- * Яндекс — smtp.yandex.ru:465 (TLS); Outlook — smtp-mail.outlook.com:587 (STARTTLS).
+ * Яндекс — smtp.yandex.ru:465 (TLS); Outlook — smtp-mail.outlook.com:587 (STARTTLS);
+ * Mail.ru — smtp.mail.ru:465 (TLS).
  */
 export function smtpConnectionFor(kind: MailProviderKind): SmtpConnectionOptions {
   switch (kind) {
@@ -25,6 +33,8 @@ export function smtpConnectionFor(kind: MailProviderKind): SmtpConnectionOptions
       return YANDEX_SMTP;
     case 'outlook':
       return OUTLOOK_SMTP;
+    case 'mail':
+      return MAIL_RU_SMTP;
     default: {
       const _exhaustive: never = kind;
       throw new Error(`неизвестный провайдер: ${String(_exhaustive)}`);

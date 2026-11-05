@@ -393,7 +393,7 @@ const ADD_ACCOUNT_FIELDS = ['provider', 'login', 'password', 'authStrategy'] as 
 type AddAccountField = (typeof ADD_ACCOUNT_FIELDS)[number];
 
 /** Допустимые значения provider. */
-const PROVIDERS: readonly MailProviderKind[] = ['yandex', 'outlook'];
+const PROVIDERS: readonly MailProviderKind[] = ['yandex', 'outlook', 'mail'];
 /** Допустимые значения authStrategy. */
 const AUTH_STRATEGIES: readonly AuthStrategyKind[] = ['basic', 'oauth2'];
 
@@ -425,7 +425,7 @@ function validateAccountField(field: AddAccountField, value: string): string | n
       const v = value.toLowerCase();
       return PROVIDERS.includes(v as MailProviderKind)
         ? null
-        : `provider должен быть yandex или outlook, получено: ${value}`;
+        : `provider должен быть yandex, outlook или mail, получено: ${value}`;
     }
     case 'login':
       return value.length > 0 ? null : 'login не должен быть пустым';
@@ -452,7 +452,7 @@ export async function promptAccountFields(io: ConsoleIO): Promise<AddAccountInpu
   const fields: Partial<Record<AddAccountField, string>> = {};
   const seen = new Set<AddAccountField>();
   io.write('Введите данные аккаунта (по одному полю на строку в формате «ключ - значение»):\n');
-  io.write('Обязательные поля: provider (yandex|outlook), login (email), password. Опц.: authStrategy (basic|oauth2). Пустая строка — завершить.\n');
+  io.write('Обязательные поля: provider (yandex|outlook|mail), login (email), password. Опц.: authStrategy (basic|oauth2). Пустая строка — завершить.\n');
 
   while (true) {
     io.write('> ');

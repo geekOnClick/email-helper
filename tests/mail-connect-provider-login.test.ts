@@ -18,6 +18,7 @@ import type { MailAccount } from '../src/tools/mail/types.js';
 const envAccounts: MailAccount[] = [
   { provider: 'yandex', login: 'env@yandex.com', password: 'env-pass', authStrategy: 'basic' },
   { provider: 'outlook', login: 'env@outlook.com', password: 'env-pass', authStrategy: 'oauth2' },
+  { provider: 'mail', login: 'env@mail.ru', password: 'env-pass', authStrategy: 'basic' },
 ];
 
 /** Записывает последний аккаунт, переданный в фабрику (для assertions). */
@@ -70,6 +71,17 @@ describe('mail.connect: контракт provider+login', () => {
     await tool.handler({ login: 'env@outlook.com', provider: 'outlook' });
     expect(lastAccount).toEqual(envAccounts[1]);
     expect(store.has('env@outlook.com')).toBe(true);
+  });
+
+  it('успех: mail-аккаунт (Mail.ru) из реестра', async () => {
+    const store = new MailSessionStore();
+    const registry = new AccountRegistry(envAccounts);
+    const tool = createMailConnectTool({ accountRegistry: registry, sessionStore: store });
+
+    const res = await tool.handler({ login: 'env@mail.ru', provider: 'mail' });
+    expect(lastAccount).toEqual(envAccounts[2]);
+    expect(store.has('env@mail.ru')).toBe(true);
+    expect(res).toMatchObject({ connected: true, provider: 'mail' });
   });
 
   it('account_not_found: login отсутствует в реестре → AccountLookupError', async () => {

@@ -5,11 +5,11 @@ export type AuthStrategy = z.infer<typeof AuthStrategySchema>;
 
 /**
  * Описание одного почтового аккаунта.
- * provider — тип провайдера: 'yandex' | 'outlook'
+ * provider — тип провайдера: 'yandex' | 'outlook' | 'mail'
  * authStrategy — стратегия аутентификации: 'basic' (логин+пароль) | 'oauth2' (XOAUTH2)
  */
 export const AccountSchema = z.object({
-  provider: z.enum(['yandex', 'outlook']),
+  provider: z.enum(['yandex', 'outlook', 'mail']),
   login: z.string().min(1),
   password: z.string().min(1),
   authStrategy: AuthStrategySchema.default('basic'),
