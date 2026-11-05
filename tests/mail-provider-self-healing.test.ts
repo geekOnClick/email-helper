@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { YandexMailProvider } from '../src/tools/mail/providers/yandex.js';
 import type { ImapClientFactory } from '../src/tools/mail/providers/abstract-imap-provider.js';
 import { ConnectError } from '../src/tools/mail/providers/abstract-imap-provider.js';
@@ -154,6 +155,94 @@ describe('AbstractImapProvider: проверка живости и прозра�
       expect(result.messages).toEqual([]);
       // reconnect вызвал logout старого client.
       expect(client.logout).toHaveBeenCalled();
+    });
+  });
+
+  describe('подавление крэша от асинхронного unhandled error (attachErrorGuard)', () => {
+    /**
+     * Воспроизводит крэш-сценарий: ImapFlow эмитит `'error'` асинхронно в простое
+     * (Socket timeout, IDLE-таймаут сервера, сетевой обрыв). Без listener Node
+     * бросает unhandled 'error' → крэш всего процесса (REPL падает, пользователь
+     * теряет сессию). Фикс: провайдер навешивает no-op listener на `'error'`.
+     *
+     * Используется реальный EventEmitter (как ImapFlow), чтобы `emit('error')`
+     * без listener реально бросал (как в проде), а с listener — нет.
+     */
+    function makeEventedFactory(opts: { usableAfterError?: boolean } = {}): {
+      factory: ImapClientFactory;
+      client: StubClient & { on: (e: string, l: (err: unknown) => void) => unknown; emit: (e: string, err?: unknown) => boolean };
+    } {
+      const ee = new EventEmitter();
+      const client = Object.assign(ee, {
+        usable: true,
+        connect: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([INBOX]),
+        mailboxOpen: vi.fn().mockResolvedValue(undefined),
+        search: vi.fn().mockResolvedValue([]),
+        fetchAll: vi.fn().mockResolvedValue([]),
+        downloadMany: vi.fn().mockResolvedValue({}),
+        logout: vi.fn().mockResolvedValue(undefined),
+      });
+      // Имитируем поведение imapflow: на emit('error') соединение помечается
+      // непригодным (closeConnectionAfter → usable=false).
+      ee.on('newListener', (event: string) => {
+        if (event === 'error') {
+          // noop — слушатель провайдера будет навешан в connect()
+        }
+      });
+      const usableAfterError = opts.usableAfterError ?? false;
+      const origEmit = ee.emit.bind(ee);
+      (client as { emit: typeof origEmit }).emit = ((event: string, ...args: unknown[]) => {
+        const r = origEmit(event, ...args);
+        if (event === 'error') client.usable = usableAfterError;
+        return r;
+      }) as typeof origEmit;
+      const factory: ImapClientFactory = () => client as never;
+      return { factory, client: client as never };
+    }
+
+    it('после connect() провайдер навешивает error-listener → emit("error") не бросает', async () => {
+      const { factory, client } = makeEventedFactory();
+      const p = new YandexMailProvider({ account, clientFactory: factory });
+      await p.connect();
+      // Без listener этот emit бросил бы unhandled 'error' → крэш.
+      // С guard-слушателем провайдера — не бросает.
+      expect(() => client.emit('error', new Error('Socket timeout'))).not.toThrow();
+    });
+
+    it('после асинхронного error: usable=false → isConnectionUsable()=false → следующая операция переподключается', async () => {
+      // Воспроизводит полный сценарий пользователя: соединение разорвалось в простое,
+      // приложение НЕ упало, пользователь вводит /smart-search → ensureMailConnected
+      // видит isConnectionUsable()=false → переподключается → операция выполняется.
+      const { factory, client } = makeEventedFactory({ usableAfterError: false });
+      const p = new YandexMailProvider({ account, clientFactory: factory });
+      await p.connect();
+      expect(p.isConnectionUsable()).toBe(true);
+
+      // Разрыв в простое: сервер эмитит 'error' (Socket timeout).
+      expect(() => client.emit('error', new Error('Socket timeout'))).not.toThrow();
+      // imapflow пометил соединение непригодным.
+      expect(client.usable).toBe(false);
+      expect(p.isConnectionUsable()).toBe(false);
+
+      // Следующая операция: reconnect (logout старого + новый connect) → успех.
+      await p.reconnect();
+      expect(client.logout).toHaveBeenCalled();
+      // usable восстановлен reconnect'ом (factory отдаёт тот же stub).
+      client.usable = true;
+      expect(p.isConnectionUsable()).toBe(true);
+    });
+
+    it('attachErrorGuard толерантен к клиенту без метода on (моки/нестандартные клиенты)', async () => {
+      // Клиент без EventEmitter-API не должен ломать connect().
+      const { factory } = makeFactory({ usable: true });
+      const p = new YandexMailProvider({ account, clientFactory: factory });
+      await expect(p.connect()).resolves.toEqual({
+        connected: true,
+        accountId: account.login,
+        provider: 'yandex',
+      });
+      expect(p.isConnectionUsable()).toBe(true);
     });
   });
 });

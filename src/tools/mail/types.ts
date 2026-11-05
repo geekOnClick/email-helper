@@ -73,6 +73,12 @@ export interface ImapClient {
     parts: string[],
     options?: { uid?: boolean },
   ): Promise<{ [key: string]: { content: Buffer; meta: Record<string, unknown> } }>;
+  /**
+   * Подписка на события жизненного цикла соединения (ImapFlow — EventEmitter).
+   * Реальные экземпляры делегируют в `EventEmitter.on`; моки могут игнорировать.
+   * Используется провайдером для подавления unhandled `'error'` (см. attachErrorGuard).
+   */
+  on(event: 'error' | string, listener: (err: unknown) => void): unknown;
 }
 
 /** Опции IMAP-соединения, формируемые стратегией аутентификации. */

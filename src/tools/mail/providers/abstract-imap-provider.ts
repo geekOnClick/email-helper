@@ -99,7 +99,34 @@ export abstract class AbstractImapProvider implements MailProvider {
       throw new ConnectError(this.sanitizeConnectError(err));
     }
     this.client = client;
+    this.attachErrorGuard(client);
     return { connected: true, accountId: this.accountId(), provider: this.providerKind };
+  }
+
+  /**
+   * Подавляет крэш процесса от асинхронного unhandled `'error'` события ImapFlow.
+   *
+   * ImapFlow — EventEmitter; при разрыве сокета в простое (IDLE-таймаут сервера,
+   * `Socket timeout`, сетевой обрыв) он эмитит `'error'` асинхронно — вне любого
+   * try/catch активной операции. По умолчанию Node бросает unhandled `'error'`
+   * → крэш процесса (весь CLI падает, пользователь теряет REPL).
+   *
+   * Это событие не «ошибка операции» — оно приходит когда никакая операция не
+   * выполняется. Само по себе оно не требует действия: imapflow в `emitError()`
+   * уже помечает соединение непригодным (`closeConnectionAfter()` → `usable=false`),
+   * а self-healing (reconnect) активируется прозрачно при следующей операции
+   * через `isConnectionUsable()` / `ensureMailConnected`. Слушатель нужен лишь
+   * чтобы EventEmitter перестал бросать. Ошибки синхронных операций по-прежнему
+   * доходят до `runWithTimeoutAndRetry` как reject промиса — их этот guard не
+   * глушит (emit для уже-установленного соединения идёт через `this.emit`, а
+   * reject — через `initialReject`/командный промис; guard их не перехватывает).
+   */
+  protected attachErrorGuard(client: ImapClient): void {
+    if (typeof client.on !== 'function') return;
+    client.on('error', () => {
+      // намеренно пусто: usable уже сброшен imapflow, reconnect выполнит
+      // следующая операция через ensureMailConnected/isConnectionUsable.
+    });
   }
 
   async listFolders(options?: Partial<MailOpOptions>): Promise<Folder[]> {
