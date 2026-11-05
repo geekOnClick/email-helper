@@ -240,3 +240,93 @@ describe('AbstractImapProvider: bounded client-side fallback (mail-search-robust
     }
   });
 });
+
+describe('AbstractImapProvider: серверный search вернул false (отказ NO/BAD)', () => {
+  /**
+   * imapflow возвращает `false`, когда сервер отказывает в поиске (NO/BAD).
+   * Например, Outlook отказывает в CHARSET UTF-8 + SUBJECT-литерале для кириллицы.
+   * Раньше код делал `false.slice(...)` → TypeError «effectiveUids.slice is not
+   * a function». Теперь `false` нормализуется в `[]`, что активирует client-side
+   * fallback (D1): суженный запрос без subject + локальная дофильтровка.
+   */
+  function makeFalseFactory(opts: { messages?: typeof MESSAGES; fallbackDays?: number }): ImapClientFactory {
+    const messages = opts.messages ?? MESSAGES;
+    return () =>
+      ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([INBOX]),
+        mailboxOpen: vi.fn().mockResolvedValue(undefined),
+        // Основной search с subject → false (имитация отказа Outlook NO/BAD).
+        // Суженный search (без subject) → UID'ы по надёжным критериям.
+        search: vi.fn().mockImplementation((query: Record<string, unknown>) => {
+          if (query.subject !== undefined) return Promise.resolve(false);
+          let uids = messages.map((m) => m.uid);
+          if (query.from !== undefined) {
+            const f = String(query.from).toLowerCase();
+            uids = uids.filter((uid) => {
+              const m = messages.find((mm) => mm.uid === uid);
+              return (
+                m?.envelope.from?.[0]?.address?.toLowerCase().includes(f) === true ||
+                m?.envelope.from?.[0]?.name?.toLowerCase().includes(f) === true
+              );
+            });
+          }
+          if (query.since !== undefined) {
+            const since = query.since instanceof Date ? query.since : new Date(query.since as string);
+            uids = uids.filter((uid) => {
+              const m = messages.find((mm) => mm.uid === uid);
+              return (m?.internalDate ?? new Date(0)) >= since;
+            });
+          }
+          return Promise.resolve(uids);
+        }),
+        fetchAll: vi.fn().mockImplementation((range: string) => {
+          const uids = range.split(',').map((n) => Number(n));
+          const filtered = messages.filter((m) => uids.includes(m.uid));
+          return Promise.resolve(filtered);
+        }),
+        logout: vi.fn().mockResolvedValue(undefined),
+      }) as never;
+  }
+
+  it('search вернул false по subject → не падает, fallback находит по subject', async () => {
+    const provider = new YandexMailProvider({ account, clientFactory: makeFalseFactory({}) });
+    await provider.connect();
+    // Раньше: TypeError: effectiveUids.slice is not a function
+    const result = await provider.search({ subject: 'Нормоконтроль' } as SearchCriteria);
+    expect(result.total).toBe(2); // суженный набор (все 2 письма)
+    expect(result.messages).toHaveLength(1); // локальная дофильтровка по subject
+    expect(result.messages[0]?.uid).toBe(2);
+  });
+
+  it('search вернул false по subject + from → fallback сужается по from', async () => {
+    const provider = new YandexMailProvider({ account, clientFactory: makeFalseFactory({}) });
+    await provider.connect();
+    const result = await provider.search({
+      subject: 'Нормоконтроль',
+      from: 'Kozloww1508@yandex.ru',
+    } as SearchCriteria);
+    expect(result.total).toBe(1); // сужено по from → только uid=2
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.uid).toBe(2);
+  });
+
+  it('search вернул false и narrowed тоже false → пустой результат без падения', async () => {
+    // Оба search-вызова возвращают false (полный отказ сервера) — нормализуется в [],
+    // slice не падает, возвращается пустой результат.
+    const f: ImapClientFactory = () =>
+      ({
+        connect: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue([INBOX]),
+        mailboxOpen: vi.fn().mockResolvedValue(undefined),
+        search: vi.fn().mockResolvedValue(false),
+        fetchAll: vi.fn().mockResolvedValue([]),
+        logout: vi.fn().mockResolvedValue(undefined),
+      }) as never;
+    const provider = new YandexMailProvider({ account, clientFactory: f });
+    await provider.connect();
+    const result = await provider.search({ subject: 'Нормоконтроль' } as SearchCriteria);
+    expect(result.total).toBe(0);
+    expect(result.messages).toEqual([]);
+  });
+});

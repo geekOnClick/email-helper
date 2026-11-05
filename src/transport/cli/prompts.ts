@@ -7,6 +7,7 @@
  */
 import type { ConsoleIO } from './io.js';
 import type { MailAccount, MailProviderKind, AuthStrategyKind } from '../../tools/mail/types.js';
+import type { SearchCriteria } from '../../types/email.js';
 import type { EmailMessage } from '../../types/email.js';
 
 /** Входные критерии поиска (любое подмножество полей). */
@@ -687,4 +688,27 @@ export function isoToDate(iso: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return new Date(iso);
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+/**
+ * Преобразует входные критерии мастера поиска в `SearchCriteria`, понятный тулу
+ * `mail.search`. Поле `date` (одна дата YYYY-MM-DD) раскрывается в диапазон одного
+ * дня включительно: `since` = полночь указанного дня, `before` = полночь
+ * следующего дня (imapflow/`matchesCriteria` используют `msg.date >= before` →
+ * отсев, поэтому `before` следующего дня включает весь указанный день).
+ *
+ * `subject`/`from` пробрасываются как есть. Не маппит `direction`/`folder`/`limit`
+ * (мастер `/analyze` их не собирает).
+ */
+export function toSearchCriteria(input: SearchCriteriaInput): SearchCriteria {
+  const criteria: SearchCriteria = {};
+  if (input.subject) criteria.subject = input.subject;
+  if (input.from) criteria.from = input.from;
+  if (input.date) {
+    criteria.since = isoToDate(input.date);
+    const before = isoToDate(input.date);
+    before.setDate(before.getDate() + 1);
+    criteria.before = before;
+  }
+  return criteria;
 }

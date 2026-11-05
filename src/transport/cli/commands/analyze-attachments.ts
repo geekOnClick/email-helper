@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ConsoleIO } from '../io.js';
-import { promptSearchCriteria, promptAccount, promptUid } from '../prompts.js';
+import { promptSearchCriteria, promptAccount, promptUid, toSearchCriteria } from '../prompts.js';
 import { ensureMailConnected } from './connect.js';
 import { formatMessageList } from '../format.js';
 import { getTool } from '../../../tools/registry.js';
@@ -47,6 +47,7 @@ export async function runAnalyzeAttachmentsCommand(
     io.write('Анализ вложений отменён.\n');
     return;
   }
+  const searchCriteria = toSearchCriteria(criteria);
 
   const account = await promptAccount(io, accounts);
   if (!account) return;
@@ -64,7 +65,7 @@ export async function runAnalyzeAttachmentsCommand(
   try {
     searchResult = (await searchTool.handler({
       login: account.login,
-      criteria,
+      criteria: searchCriteria,
     })) as SearchResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

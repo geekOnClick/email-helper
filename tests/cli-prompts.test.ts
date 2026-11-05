@@ -6,6 +6,7 @@ import {
   promptAccount,
   promptUid,
   promptConfirm,
+  toSearchCriteria,
 } from '../src/transport/cli/prompts.js';
 import { MockConsoleIO } from './mock-io.js';
 import type { MailAccount } from '../src/tools/mail/types.js';
@@ -208,5 +209,61 @@ describe('promptConfirm', () => {
   it('EOF → false', async () => {
     const io = new MockConsoleIO([]);
     expect(await promptConfirm(io, 'Отправить?')).toBe(false);
+  });
+});
+
+describe('toSearchCriteria', () => {
+  it('дата → since/before одного дня включительно', () => {
+    const c = toSearchCriteria({ date: '2026-11-03' });
+    // since = полночь 2026-11-03
+    expect(c.since).toEqual(new Date(2026, 10, 3));
+    // before = полночь 2026-11-04 (следующий день) → весь 2026-11-03 включается
+    expect(c.before).toEqual(new Date(2026, 10, 4));
+    expect(c.subject).toBeUndefined();
+    expect(c.from).toBeUndefined();
+  });
+
+  it('тема + отправитель → пробрасываются как есть', () => {
+    const c = toSearchCriteria({
+      subject: 'Интернет-магазин "Сестрица" - Новый заказ',
+      from: 'noreply@voda-sestrica.ru',
+    });
+    expect(c.subject).toBe('Интернет-магазин "Сестрица" - Новый заказ');
+    expect(c.from).toBe('noreply@voda-sestrica.ru');
+    expect(c.since).toBeUndefined();
+    expect(c.before).toBeUndefined();
+  });
+
+  it('тема + дата + отправитель → полный критерий с диапазоном одного дня', () => {
+    // Воспроизводит сценарий бага: тема + отправитель + дата 2026-11-03.
+    // Раньше date игнорировался → возвращались письма из 2023. Теперь date
+    // становится since=2026-11-03 + before=2026-11-04 → ровно один день.
+    const c = toSearchCriteria({
+      subject: 'Интернет-магазин "Сестрица" - Новый заказ',
+      from: 'noreply@voda-sestrica.ru',
+      date: '2026-11-03',
+    });
+    expect(c.subject).toBe('Интернет-магазин "Сестрица" - Новый заказ');
+    expect(c.from).toBe('noreply@voda-sestrica.ru');
+    expect(c.since).toEqual(new Date(2026, 10, 3));
+    expect(c.before).toEqual(new Date(2026, 10, 4));
+  });
+
+  it('пустой ввод → пустой критерий', () => {
+    const c = toSearchCriteria({});
+    expect(c).toEqual({});
+  });
+
+  it('before точно отсекает следующий день (граница диапазона)', () => {
+    // Письмо от 2026-11-04 00:00:00 не должно попасть в диапазон 2026-11-03.
+    // matchesCriteria: msg.date >= before → false → отсев.
+    const c = toSearchCriteria({ date: '2026-11-03' });
+    const before = c.before as Date;
+    const nextDayMidnight = new Date(2026, 10, 4, 0, 0, 0, 0);
+    expect(nextDayMidnight >= before).toBe(true); // отсечётся
+    // Письмо от 2026-11-03 23:59:59 должно попасть.
+    const sameDayLate = new Date(2026, 10, 3, 23, 59, 59);
+    expect(sameDayLate >= (c.since as Date)).toBe(true);
+    expect(sameDayLate < before).toBe(true);
   });
 });

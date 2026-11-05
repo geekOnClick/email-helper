@@ -5,8 +5,9 @@
  * Поддерживаемые форматы:
  * - Текстовые (txt/csv/json/html/htm/eml) — чтение как UTF-8 (HTML — stripping тегов).
  * - PDF — `pdf-parse` (класс `PDFParse`).
- * - DOCX — `mammoth.extractRawText`.
- * - XLSX — `xlsx` (чтение листов в CSV-текст).
+ * - DOC/DOCX — `word-extractor` (legacy OLE .doc и OOXML .docx).
+ * - XLS/XLSX — `xlsx` (чтение листов в CSV-текст).
+ * - PPTX — `jszip` (распаковка слайдов, извлечение текста из `<a:t>`).
  *
  * Изображения и прочие бинарные форматы — `{ skipped: true, reason }` (анализатор
  * их не получает; команда выводит пометку). Не используется мультимодальный
@@ -91,22 +92,28 @@ export async function extractAttachmentText(filePath: string): Promise<Attachmen
     }
   }
 
-  // DOCX — mammoth.
-  if (ext === '.docx') {
+  // DOC/DOCX — word-extractor (legacy OLE .doc и OOXML .docx).
+  if (ext === '.doc' || ext === '.docx') {
     try {
-      const mammoth = await import('mammoth');
-      const result = await mammoth.extractRawText({ path: filePath });
-      return { filename, text: result.value, skipped: false as const };
+      const WordExtractor = (await import('word-extractor')).default;
+      const extractor = new WordExtractor();
+      const doc = await extractor.extract(filePath);
+      const text = doc.getBody();
+      return { filename, text: text ?? '', skipped: false as const };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      return { filename, skipped: true as const, reason: `ошибка DOCX: ${reason}` };
+      return { filename, skipped: true as const, reason: `ошибка DOC/DOCX: ${reason}` };
     }
   }
 
-  // XLSX — xlsx.
-  if (ext === '.xlsx') {
+  // XLS/XLSX — xlsx (BIFF8 .xls и OOXML .xlsx).
+  if (ext === '.xls' || ext === '.xlsx') {
     try {
-      const XLSX = await import('xlsx');
+      // xlsx — CommonJS-пакет: при `await import('xlsx')` в ESM-контексте Node
+      // кладёт API на `.default`, а на самом namespace остаются только часть
+      // методов. Берём `.default` с fallback на сам namespace для совместимости.
+      const imported = await import('xlsx');
+      const XLSX = (imported as unknown as { default?: typeof imported }).default ?? imported;
       const wb = XLSX.readFile(filePath);
       const sheets: string[] = [];
       for (const name of wb.SheetNames) {
@@ -118,7 +125,38 @@ export async function extractAttachmentText(filePath: string): Promise<Attachmen
       return { filename, text: sheets.join('\n\n'), skipped: false as const };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      return { filename, skipped: true as const, reason: `ошибка XLSX: ${reason}` };
+      return { filename, skipped: true as const, reason: `ошибка XLS/XLSX: ${reason}` };
+    }
+  }
+
+  // PPTX — jszip (распаковка слайдов, извлечение текста из <a:t>).
+  if (ext === '.pptx') {
+    try {
+      const JSZip = (await import('jszip')).default;
+      const data = fs.readFileSync(filePath);
+      const zip = await JSZip.loadAsync(data);
+      // Слайды: ppt/slides/slideN.xml. Сортируем по номеру слайда.
+      const slideNames = Object.keys(zip.files)
+        .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+        .sort((a, b) => {
+          const na = Number(/slide(\d+)/.exec(a)?.[1] ?? 0);
+          const nb = Number(/slide(\d+)/.exec(b)?.[1] ?? 0);
+          return na - nb;
+        });
+      const slides: string[] = [];
+      for (const name of slideNames) {
+        const entry = zip.files[name];
+        if (!entry) continue;
+        const xml = await entry.async('string');
+        // Текстовые фрагменты в DrawingML — внутри <a:t>...</a:t>.
+        const texts = [...xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((m) => m[1]);
+        const slideLabel = name.split('/').pop()?.replace('.xml', '') ?? name;
+        slides.push(`=== ${slideLabel} ===\n${texts.join('\n')}`);
+      }
+      return { filename, text: slides.join('\n\n'), skipped: false as const };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { filename, skipped: true as const, reason: `ошибка PPTX: ${reason}` };
     }
   }
 

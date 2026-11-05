@@ -25,6 +25,18 @@ export type ImapClientFactory = (options: ImapFlowOptions) => ImapClient;
 const defaultFactory: ImapClientFactory = (options) =>
   new ImapFlow(options) as unknown as ImapClient;
 
+/**
+ * Нормализует результат `client.search()`. imapflow возвращает `false`, когда сервер
+ * отказывает в поиске (ответ NO/BAD — напр. Outlook отказывает в CHARSET UTF-8
+ * SUBJECT-литерале), намеренно отличая это от пустого массива. Наша доменная
+ * логика (client-side fallback, slice, total) ожидает массив, поэтому `false`
+ * трактуем как «ничего не найдено» — это активирует существующий fallback (D1)
+ * к суженному запросу + локальной фильтрации.
+ */
+function normalizeSearchResult(result: number[] | false): number[] {
+  return Array.isArray(result) ? result : [];
+}
+
 /** Ошибка «подключение не установлено» — доменный класс. */
 export class ConnectError extends Error {}
 
@@ -130,7 +142,7 @@ export abstract class AbstractImapProvider implements MailProvider {
 
       // 2. серверный поиск по полному query (включая subject).
       const query = this.buildSearchObject(criteria);
-      const uids = await client.search(query, { uid: true });
+      const uids = normalizeSearchResult(await client.search(query, { uid: true }));
 
       // 2b. Client-side fallback: серверный SEARCH Яндекса по длинным кириллическим
       // SUBJECT-литералам ненадёжен (возвращает 0 даже при совпадении). Если серверный
@@ -140,7 +152,7 @@ export abstract class AbstractImapProvider implements MailProvider {
       let effectiveUids = uids;
       if (effectiveUids.length === 0 && this.hasTextCriteria(criteria)) {
         const narrowedQuery = this.buildNarrowedQuery(criteria, opts.fallbackDays);
-        effectiveUids = await client.search(narrowedQuery, { uid: true });
+        effectiveUids = normalizeSearchResult(await client.search(narrowedQuery, { uid: true }));
       }
       const total = effectiveUids.length;
 

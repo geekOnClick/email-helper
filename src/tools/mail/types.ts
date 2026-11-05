@@ -49,8 +49,12 @@ export interface ImapClient {
   list(options?: { status?: boolean }): Promise<ListResponse[]>;
   /** Открыть папку для последующих search/fetch. */
   mailboxOpen(path: string, options?: { readOnly?: boolean }): Promise<MailboxObject>;
-  /** Поиск писем в текущей папке. Возвращает UID'ы (при opts.uid=true). */
-  search(query: SearchObject, options?: { uid?: boolean }): Promise<number[]>;
+  /**
+   * Поиск писем в текущей папке. Возвращает UID'ы (при opts.uid=true).
+   * Замечание: imapflow возвращает `false`, когда сервер отказывает в поиске
+   * (NO/BAD); вызывающий код обязан нормализовать `false` → `[]`.
+   */
+  search(query: SearchObject, options?: { uid?: boolean }): Promise<number[] | false>;
   /** Выгрузка метаданных писем по диапазону/UID'ам. */
   fetchAll(
     range: string | number[] | SearchObject,
