@@ -2,17 +2,18 @@
  * Команда /add-account: заведение/обновление почтового аккаунта в `.env`
  * (change mcp-env-account-credentials).
  *
- * Собирает поля аккаунта (provider, login, password, authStrategy) через мастер
- * ввода, при дубликате login запрашивает подтверждение перезаписи, добавляет/
- * обновляет запись в in-memory `AccountRegistry` и атомарно сохраняет обновлённый
- * `ACCOUNTS` в `.env`. Команда доступна только в локальном CLI и НЕ экспонируется
- * по MCP — пароль вводится в терминале оператора, минуя MCP-wire и LLM.
+ * Тонкий CLI-адаптер (change web-interface, design D1): собирает поля через
+ * мастер ввода, при дубликате login запрашивает подтверждение, вызывает чистую
+ * функцию `saveAccount` (из transport/commands). Доменная логика (валидация +
+ * запись в реестр + `.env`) переиспользуется вебом без дублирования.
+ *
+ * Команда доступна только в локальном CLI (и вебе) и НЕ экспонируется по MCP —
+ * пароль вводится на бэкенде, минуя MCP-wire и LLM.
  */
 import type { ConsoleIO } from '../io.js';
 import { promptAccountFields, promptConfirm } from '../prompts.js';
-import { updateAccountsInEnv } from '../../../config/env-writer.js';
+import { saveAccount } from '../../commands/add-account.js';
 import type { AccountRegistry } from '../../../config/account-registry.js';
-import type { MailAccount } from '../../../tools/mail/types.js';
 
 /** Зависимости команды /add-account. */
 export interface AddAccountCommandDeps {
@@ -37,13 +38,6 @@ export async function runAddAccountCommand(deps: AddAccountCommandDeps): Promise
     return;
   }
 
-  const account: MailAccount = {
-    provider: input.provider,
-    login: input.login,
-    password: input.password,
-    authStrategy: input.authStrategy,
-  };
-
   // Дубликат login → подтверждение перезаписи.
   if (registry.has(input.login)) {
     const confirmed = await promptConfirm(
@@ -56,20 +50,23 @@ export async function runAddAccountCommand(deps: AddAccountCommandDeps): Promise
     }
   }
 
-  // Добавление/обновление в реестре (in-memory) + атомарная запись в .env.
-  registry.upsert(account);
+  // Чистая функция: валидация + реестр + атомарная запись в .env (переиспользуется вебом).
   try {
-    await updateAccountsInEnv(envPath, registry.list());
+    const result = await saveAccount({
+      account: {
+        provider: input.provider,
+        login: input.login,
+        password: input.password,
+        authStrategy: input.authStrategy,
+      },
+      registry,
+      envPath,
+    });
+    io.write(`✓ Аккаунт сохранён: ${result.login} (${result.provider}, ${result.authStrategy}).\n`);
+    io.write('  Записано в ACCOUNTS в .env.\n');
+    io.write('  Напоминаем: перезапустите MCP-сервер, чтобы он увидел новый аккаунт.\n');
   } catch (err) {
-    // Откатываем изменение в реестре, чтобы состояние не разошлось с .env.
-    // (В простом случае — оставляем прежнее; для надёжности перечитываем не делаем,
-    // т.к. .env — единственный персистентный источник.)
     const msg = err instanceof Error ? err.message : String(err);
-    io.write(`Ошибка сохранения в .env: ${msg}. Изменение в реестре сохранено в памяти до перезапуска.\n`);
-    return;
+    io.write(`Ошибка сохранения: ${msg}\n`);
   }
-
-  io.write(`✓ Аккаунт сохранён: ${account.login} (${account.provider}, ${account.authStrategy}).\n`);
-  io.write('  Записано в ACCOUNTS в .env.\n');
-  io.write('  Напоминаем: перезапустите MCP-сервер, чтобы он увидел новый аккаунт.\n');
 }

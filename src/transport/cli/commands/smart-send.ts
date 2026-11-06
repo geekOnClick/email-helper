@@ -2,25 +2,19 @@
  * Команда /smart-send: генерация тела письма по промпту и отправка с циклом
  * правки (change cli-smart-commands, design D4).
  *
- * Поток: мастер (тема, получатель, промпт) → выбор аккаунта → подключение →
- * one-shot вызов LLM-клиента (роль `helper`) генерирует тело (plain text) по
- * теме + промпту → показ черновика (`formatDraft`) → `promptSendAction`:
- * - `send` → `mail.send` с `confirm: true` → успех;
- * - `cancel` → отмена без отправки;
- * - `redo` → регенерация ТОЛЬКО тела по обратной связи (тема/получатель
- *   фиксированы) → новый черновик → повтор цикла.
- *
- * Без явного потолка итераций правки (до подтверждения/отмены). Тело — plain
- * text. Тулы `mail.send` и спека `mail/send` НЕ меняются.
+ * Тонкий CLI-адаптер (change web-interface, design D1): собирает поля, вызывает
+ * чистые функции `generateSmartSendBody` и `sendSmartSend` (из transport/
+ * commands), рендерит черновик и запрашивает действие. Цикл правки (тема/
+ * получатель фиксированы) сохранён. Доменная логика переиспользуется вебом.
  */
 import type { ConsoleIO } from '../io.js';
 import { promptSmartSendCriteria, promptAccount, promptSendAction } from '../prompts.js';
 import { ensureMailConnected } from './connect.js';
 import { formatDraft } from '../format.js';
 import { getTool } from '../../../tools/registry.js';
+import { generateSmartSendBody, sendSmartSend } from '../../commands/smart-send.js';
 import type { MailAccount } from '../../../tools/mail/types.js';
 import type { RouterAiClient } from '../../../llm/routerai-client.js';
-import type { ChatMessage } from '../../../llm/types.js';
 
 /** Зависимости команды /smart-send. */
 export interface SmartSendCommandDeps {
@@ -57,10 +51,17 @@ export async function runSmartSendCommand(deps: SmartSendCommandDeps): Promise<v
   let currentBody: string | null = null;
   let lastFeedback: string | undefined;
   while (true) {
-    // Генерация тела (one-shot, роль helper).
+    // Генерация тела через чистую функцию (переиспользуется вебом).
     let body: string;
     try {
-      body = await generateBody(llmClient, input.subject, input.to, input.prompt, currentBody, lastFeedback);
+      body = await generateSmartSendBody({
+        llmClient,
+        subject: input.subject,
+        to: input.to,
+        prompt: input.prompt,
+        ...(currentBody !== null ? { currentBody } : {}),
+        ...(lastFeedback !== undefined ? { feedback: lastFeedback } : {}),
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       io.write(`Ошибка генерации тела: ${msg}\n`);
@@ -79,20 +80,17 @@ export async function runSmartSendCommand(deps: SmartSendCommandDeps): Promise<v
     // Запрос действия.
     const action = await promptSendAction(io);
     if (action.action === 'send') {
-      try {
-        await sendTool.handler({
-          login: account.login,
-          mail: {
-            to: [{ address: input.to }],
-            subject: input.subject,
-            text: body,
-          },
-          confirm: true,
-        });
+      const result = await sendSmartSend({
+        accountLogin: account.login,
+        sendTool,
+        to: input.to,
+        subject: input.subject,
+        body,
+      });
+      if (result.sent) {
         io.write('Письмо отправлено.\n');
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        io.write(`Ошибка отправки: ${msg}\n`);
+      } else {
+        io.write(`Ошибка отправки: ${result.error ?? 'неизвестная ошибка'}\n`);
       }
       return;
     }
@@ -105,44 +103,4 @@ export async function runSmartSendCommand(deps: SmartSendCommandDeps): Promise<v
     lastFeedback = action.feedback;
     io.write('Перегенерирую тело письма...\n');
   }
-}
-
-/**
- * Генерирует тело письма (plain text) одним вызовом LLM-клиента (роль helper).
- *
- * - Первичная генерация: по теме + промпту.
- * - Правка: по теме + исходному промпту + текущему телу + обратной связи.
- * Тема и получатель всегда в контексте (фиксированы), модель правит только тело.
- */
-async function generateBody(
-  client: RouterAiClient,
-  subject: string,
-  to: string,
-  prompt: string,
-  currentBody: string | null,
-  feedback?: string,
-): Promise<string> {
-  const systemParts: string[] = [
-    'Ты — помощник, составляющий тело email-письма на русском языке (plain text, без HTML).',
-    `Тема письма (не меняй): ${subject}.`,
-    `Получатель (не меняй): ${to}.`,
-    'Верни ТОЛЬКО тело письма (без темы, без «Кому», без пояснений).',
-  ];
-
-  const userParts: string[] = [];
-  if (currentBody && feedback) {
-    userParts.push(`Исходный промпт письма: ${prompt}`);
-    userParts.push(`Текущее тело письма:\n${currentBody}`);
-    userParts.push(`Переделай тело по обратной связи (тему и получателя не меняй): ${feedback}`);
-  } else {
-    userParts.push(`Составь тело письма по инструкции: ${prompt}`);
-  }
-
-  const messages: ChatMessage[] = [
-    { role: 'system', content: systemParts.join('\n') },
-    { role: 'user', content: userParts.join('\n\n') },
-  ];
-
-  const result = await client.chat({ messages, role: 'helper' });
-  return result.content.trim();
 }

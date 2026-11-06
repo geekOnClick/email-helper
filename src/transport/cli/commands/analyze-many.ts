@@ -2,28 +2,19 @@
  * Команда /analyze-many:批量-поиск писем и анализ каждого + общий смысл
  * (change cli-smart-commands).
  *
- * Подход (как у бывшей /find-all, design D2): мастер критериев (тема/
- * отправитель/диапазон дат) → серверу передаётся ТОЛЬКО диапазон дат, тема/
- * отправитель фильтруются локально через `collectAllMessages` (из
- * search-aggregator). Затем тела всех найденных писем фетчатся через `mail.fetch`
- * (с потолком `ANALYZE_MANY_MAX_EMAILS`) и одним вызовом субагента-анализатора
- * формируют: краткое саммари каждого письма + общий смысл всех писем (если он
- * есть; иначе — указание, что письма не связаны).
- *
- * Тулы `mail.search`/`mail.fetch` и спеки `mail/*` НЕ меняются.
+ * Тонкий CLI-адаптер (change web-interface, design D1): собирает критерии,
+ * вызывает чистую функцию `runAnalyzeMany` (из transport/commands) и рендерит
+ * сводный отчёт. Доменная логика (поиск + фетч тел + анализ) переиспользуется
+ * вебом без дублирования.
  */
 import type { ConsoleIO } from '../io.js';
-import { promptFindAllCriteria, buildSearchArgsFromFindAll } from '../prompts.js';
+import { promptFindAllCriteria } from '../prompts.js';
 import { promptAccount } from '../prompts.js';
 import { getTool } from '../../../tools/registry.js';
 import { ensureMailConnected } from './connect.js';
-import { collectAllMessages } from './search-aggregator.js';
+import { runAnalyzeMany } from '../../commands/analyze-many.js';
 import type { MailAccount } from '../../../tools/mail/types.js';
 import type { Subagent } from '../../../agents/subagent.js';
-import type { EmailFull } from '../../../types/email.js';
-
-/** Дефолт потолка числа писем, если deps.maxEmails не задан. */
-const DEFAULT_MAX_EMAILS = 10;
 
 /** Зависимости команды /analyze-many. */
 export interface AnalyzeManyCommandDeps {
@@ -42,7 +33,6 @@ export interface AnalyzeManyCommandDeps {
 /** Выполняет команду /analyze-many. */
 export async function runAnalyzeManyCommand(deps: AnalyzeManyCommandDeps): Promise<void> {
   const { io, accounts, analyzer } = deps;
-  const maxEmails = deps.maxEmails ?? DEFAULT_MAX_EMAILS;
 
   const criteria = await promptFindAllCriteria(io);
   if (!criteria) {
@@ -66,74 +56,31 @@ export async function runAnalyzeManyCommand(deps: AnalyzeManyCommandDeps): Promi
     return;
   }
 
-  //批量-поиск (сервер — только даты, тема/отправитель локально).
-  const args = buildSearchArgsFromFindAll(criteria);
-  let collected;
-  try {
-    collected = await collectAllMessages(searchTool, account.login, args);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    io.write(`Ошибка поиска: ${msg}\n`);
-    return;
-  }
-
-  if (collected.messages.length === 0) {
-    io.write('Ничего не найдено.\n');
-    return;
-  }
-
-  // Потолок числа писем для анализа: усечение с предупреждением.
-  const all = collected.messages;
-  const truncatedByEmails = all.length > maxEmails;
-  const toAnalyze = truncatedByEmails ? all.slice(0, maxEmails) : all;
-  if (truncatedByEmails) {
-    io.write(
-      `⚠ Найдено ${all.length} писем; анализируются первые ${maxEmails} (остальные пропущены).\n`,
-    );
-  }
-  if (collected.truncated) {
-    io.write('⚠ Достигнут лимит пагинации: показаны не все найденные письма.\n');
-  }
-
-  // Фетч тел писем через mail.fetch (последовательно).
-  const emails: EmailFull[] = [];
-  for (const m of toAnalyze) {
-    try {
-      const raw = await fetchTool.handler({ login: account.login, uid: m.uid });
-      emails.push(raw as EmailFull);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      io.write(`Ошибка чтения письма UID=${m.uid}: ${msg}\n`);
-    }
-  }
-
-  if (emails.length === 0) {
-    io.write('Не удалось прочитать ни одного письма для анализа.\n');
-    return;
-  }
-
-  // Сборка инструкции для анализатора: саммари каждого + общий смысл.
-  const parts: string[] = ['Проанализируй следующие письма. Для каждого дай краткое саммари.'];
-  parts.push('После саммари всех писем напиши общий смысл всех писем (если он есть);');
-  parts.push('если письма не связаны и общего смысла нет — так и укажи.');
-  parts.push('');
-  emails.forEach((email, i) => {
-    const from = email.from?.address ?? 'неизвестно';
-    const date = email.date.toISOString().slice(0, 10);
-    parts.push(`--- Письмо ${i + 1} ---`);
-    parts.push(`UID: ${email.uid}`);
-    parts.push(`Тема: ${email.subject}`);
-    parts.push(`Отправитель: ${from}`);
-    parts.push(`Дата: ${date}`);
-    parts.push(`Тело:`);
-    parts.push(email.body ?? '(тело недоступно)');
-    parts.push('');
-  });
-
+  // Чистая функция:批量-поиск + фетч тел + анализ (переиспользуется вебом).
   io.write('Анализирую письма...\n');
   try {
-    const summary = await analyzer.run(parts.join('\n'));
-    io.write(summary + '\n');
+    const result = await runAnalyzeMany({
+      accountLogin: account.login,
+      criteria,
+      searchTool,
+      fetchTool,
+      analyzer,
+      maxEmails: deps.maxEmails,
+    });
+
+    if (result.totalFound === 0) {
+      io.write('Ничего не найдено.\n');
+      return;
+    }
+    if (result.truncatedByEmails) {
+      io.write(
+        `⚠ Найдено ${result.totalFound} писем; анализируются первые ${result.messages.length} (остальные пропущены).\n`,
+      );
+    }
+    if (result.truncatedByPagination) {
+      io.write('⚠ Достигнут лимит пагинации: показаны не все найденные письма.\n');
+    }
+    io.write(result.analysis + '\n');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     io.write(`Ошибка анализа: ${msg}\n`);

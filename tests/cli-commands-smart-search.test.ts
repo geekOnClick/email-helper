@@ -273,7 +273,7 @@ describe('runSmartSearchCommand', () => {
     const io = new MockConsoleIO(['найди письмо', '']);
     await runSmartSearchCommand({ io, accounts: [ACCOUNT], llmClient: llm, fallbackDays: 180, maxEmails: 10 });
     const out = io.output();
-    expect(out).toContain('Ошибка разбора промпта');
+    expect(out).toContain('модель вернула невалидный JSON');
     // Поиск не выполнялся.
     expect(searchCalled).toHaveLength(0);
   });

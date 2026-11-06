@@ -1,18 +1,20 @@
 /**
  * Команда /analyze: найти и проанализировать письмо (change guided-commands).
  *
- * Собирает критерии, ищет письма, при нескольких совпадениях показывает
- * первые 5 и просит выбрать UID, читает письмо через mail.fetch и анализирует
- * его содержимое через субагента-анализатора (LLM).
+ * Тонкий CLI-адаптер (change web-interface, design D1): собирает критерии,
+ * ищет письма, выбирает UID, вызывает чистую функцию `runAnalyze` (из transport/
+ * commands) и рендерит отчёт. Доменная логика (фетч + анализ) переиспользуется
+ * вебом без дублирования.
  */
 import type { ConsoleIO } from '../io.js';
 import { promptSearchCriteria, promptAccount, promptUid, toSearchCriteria } from '../prompts.js';
 import { ensureMailConnected } from './connect.js';
 import { formatMessageList } from '../format.js';
 import { getTool } from '../../../tools/registry.js';
+import { runAnalyze } from '../../commands/analyze.js';
 import type { MailAccount } from '../../../tools/mail/types.js';
 import type { Subagent } from '../../../agents/subagent.js';
-import type { SearchResult, EmailFull } from '../../../types/email.js';
+import type { SearchResult } from '../../../types/email.js';
 
 /** Зависимости команды /analyze. */
 export interface AnalyzeCommandDeps {
@@ -80,35 +82,16 @@ export async function runAnalyzeCommand(deps: AnalyzeCommandDeps): Promise<void>
     selectedUid = uid;
   }
 
-  // Чтение письма.
-  let email: EmailFull;
-  try {
-    email = (await fetchTool.handler({
-      login: account.login,
-      uid: selectedUid,
-    })) as EmailFull;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    io.write(`Ошибка чтения письма: ${msg}\n`);
-    return;
-  }
-
-  // Анализ через субагента-анализатора.
-  const from = email.from?.address ?? 'неизвестно';
-  const date = email.date.toISOString().slice(0, 10);
-  const instruction = [
-    `Проанализируй письмо.`,
-    `Тема: ${email.subject}`,
-    `Отправитель: ${from}`,
-    `Дата: ${date}`,
-    `Тело письма:`,
-    email.body,
-  ].join('\n');
-
+  // Чтение письма + анализ через чистую функцию (переиспользуется вебом).
   io.write('Анализирую письмо...\n');
   try {
-    const summary = await analyzer.run(instruction);
-    io.write(summary + '\n');
+    const result = await runAnalyze({
+      accountLogin: account.login,
+      uid: selectedUid,
+      fetchTool,
+      analyzer,
+    });
+    io.write(result.analysis + '\n');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     io.write(`Ошибка анализа: ${msg}\n`);

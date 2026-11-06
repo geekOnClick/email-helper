@@ -2,27 +2,20 @@
  * Команда /analyze-attachments: поиск письма, анализ его вложений с саммари
  * (change cli-smart-commands, design D3).
  *
- * Поток: мастер критериев → поиск писем → выбор UID (1 → сразу, >1 → показ 5 +
- * запрос UID) → скачивание вложений во ВРЕМЕННУЮ папку (os.tmpdir() + уникальный
- * поддиректорий, НЕ системная ~/Загрузки) через `mail.downloadAttachments` →
- * извлечение текста (`extractAttachmentText`) для каждого файла → сборка
- * инструкции → субагент-анализатор → вывод саммари каждого вложения → удаление
- * временной папки в `finally` (ВСЕГДА: при успехе и при ошибке).
- *
- * Тулы `mail.search`/`mail.downloadAttachments` и спеки `mail/*` НЕ меняются.
+ * Тонкий CLI-адаптер (change web-interface, design D1): собирает критерии,
+ * ищет письма, выбирает UID, вызывает чистую функцию `runAnalyzeAttachments`
+ * (из transport/commands) и рендерит саммари. Доменная логика (скачивание +
+ * извлечение текста + анализ + очистка tmp) переиспользуется вебом.
  */
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import type { ConsoleIO } from '../io.js';
 import { promptSearchCriteria, promptAccount, promptUid, toSearchCriteria } from '../prompts.js';
 import { ensureMailConnected } from './connect.js';
 import { formatMessageList } from '../format.js';
 import { getTool } from '../../../tools/registry.js';
-import { extractAttachmentText } from './attachment-text.js';
+import { runAnalyzeAttachments } from '../../commands/analyze-attachments.js';
 import type { MailAccount } from '../../../tools/mail/types.js';
 import type { Subagent } from '../../../agents/subagent.js';
-import type { SearchResult, DownloadResult } from '../../../types/email.js';
+import type { SearchResult } from '../../../types/email.js';
 
 /** Зависимости команды /analyze-attachments. */
 export interface AnalyzeAttachmentsCommandDeps {
@@ -32,7 +25,7 @@ export interface AnalyzeAttachmentsCommandDeps {
   accounts: MailAccount[];
   /** Субагент-анализатор (LLM). */
   analyzer: Subagent;
-  /** Базовая папка для временных файлов (по умолчанию — os.tmpdir()). */
+  /** Базовая папка для временных файлов (пробрасывается в чистую функцию). */
   tmpDir?: string;
 }
 
@@ -94,89 +87,43 @@ export async function runAnalyzeAttachmentsCommand(
     selectedUid = uid;
   }
 
-  // Временная папка: os.tmpdir() + уникальный поддиректорий.
-  const baseTmp = deps.tmpDir ?? os.tmpdir();
-  const tmpDir = path.join(baseTmp, `email-helper-attachments-${Date.now()}-${process.pid}`);
-  fs.mkdirSync(tmpDir, { recursive: true });
-
-  let result: DownloadResult;
+  // Чистая функция: скачивание + извлечение текста + анализ + очистка tmp.
   try {
-    result = (await downloadTool.handler({
-      login: account.login,
+    const result = await runAnalyzeAttachments({
+      accountLogin: account.login,
       uid: selectedUid,
-      targetDir: tmpDir,
-    })) as DownloadResult;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    io.write(`Ошибка скачивания: ${msg}\n`);
-    await cleanupDir(tmpDir);
-    return;
-  }
+      downloadTool,
+      analyzer,
+      tmpDir: deps.tmpDir,
+    });
 
-  if (!result.paths || result.paths.length === 0) {
-    io.write('Письмо не содержит вложений.\n');
-    await cleanupDir(tmpDir);
-    return;
-  }
-
-  // Извлечение текста + сборка инструкции в finally-безопасном блоке.
-  try {
-    io.write(`Скачано вложений: ${result.paths.length}. Анализирую...\n`);
-
-    const extracted = [];
-    for (const filePath of result.paths) {
-      const r = await extractAttachmentText(filePath);
-      extracted.push(r);
+    if (result.attachmentCount === 0) {
+      io.write('Письмо не содержит вложений.\n');
+      return;
     }
-
-    const supported = extracted.filter((e) => !e.skipped);
-    const skipped = extracted.filter((e) => e.skipped);
-
-    if (supported.length === 0) {
+    // Все неподдерживаемые — анализ невозможен.
+    if (result.analysis === '' && result.analysisError === undefined && result.skipped.length > 0) {
       io.write('Все вложения — неподдерживаемые форматы (анализ невозможен).\n');
-      for (const s of skipped) {
+      for (const s of result.skipped) {
         io.write(`  ${s.filename}: ${s.reason ?? 'пропуск'}\n`);
       }
       return;
     }
-
-    // Сборка инструкции для анализатора.
-    const parts: string[] = [
-      'Проанализируй следующие вложения письма. Для каждого дай краткое саммари содержимого.',
-      '',
-    ];
-    supported.forEach((e, i) => {
-      parts.push(`--- Вложение ${i + 1}: ${e.filename} ---`);
-      parts.push(e.text ?? '(текст недоступен)');
-      parts.push('');
-    });
-
-    try {
-      const summary = await analyzer.run(parts.join('\n'));
-      io.write(summary + '\n');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      io.write(`Ошибка анализа: ${msg}\n`);
+    io.write(`Скачано вложений: ${result.attachmentCount}. Анализирую...\n`);
+    if (result.analysisError !== undefined) {
+      io.write(`Ошибка анализа: ${result.analysisError}\n`);
+    } else {
+      io.write(result.analysis + '\n');
     }
 
-    // Отметка пропущенных вложений.
-    if (skipped.length > 0) {
+    if (result.skipped.length > 0) {
       io.write('\nНе проанализировано (неподдерживаемый формат):\n');
-      for (const s of skipped) {
+      for (const s of result.skipped) {
         io.write(`  ${s.filename}: ${s.reason ?? 'пропуск'}\n`);
       }
     }
-  } finally {
-    // Удаление временных файлов — ВСЕГДА (при успехе и при ошибке).
-    await cleanupDir(tmpDir);
-  }
-}
-
-/** Рекурсивно удаляет каталог (содержимое + сам каталог). */
-async function cleanupDir(dir: string): Promise<void> {
-  try {
-    await fs.promises.rm(dir, { recursive: true, force: true });
-  } catch {
-    // Ошибка удаления tmp — не роняем команду; ОС почистит при перезагрузке.
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    io.write(`Ошибка анализа вложений: ${msg}\n`);
   }
 }

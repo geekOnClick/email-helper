@@ -62,6 +62,12 @@ export const ConfigSchema = z.object({
   // анализ первых N с предупреждением об усечении.
   ANALYZE_MANY_MAX_EMAILS: z.coerce.number().int().positive().default(10),
 
+  // === Веб-транспорт (transport/web) ===
+  // Порт HTTP-сервера веб-интерфейса. По умолчанию 3000.
+  WEB_PORT: z.coerce.number().int().positive().default(3000),
+  // Хост веб-сервера. По умолчанию 127.0.0.1 (localhost-only, как MCP HTTP).
+  WEB_HOST: z.string().default('127.0.0.1'),
+
   // === Microsoft identity (OAuth2 для Outlook, Phase 1) ===
   // Public client (без секрета), tenant 'consumers' для личных @outlook.com
   MS_CLIENT_ID: z.string().default(''),
