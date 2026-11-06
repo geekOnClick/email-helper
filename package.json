@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "dev": "npm run web:dev",
     "web": "tsx src/index.ts --web",
     "web:dev": "concurrently -k -n api,web -c blue,green \"tsx src/index.ts --web\" \"vite\"",
     "web:build": "vite build"
