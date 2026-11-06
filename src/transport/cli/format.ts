@@ -108,7 +108,7 @@ export function formatCommandHelp(useColor = true): string {
   return [
     'Команды:',
     cmd('/analyze', 'найти и проанализировать одно письмо'),
-    cmd('/analyze-many', 'поиск и批量-анализ писем + общий смысл'),
+    cmd('/analyze-many', 'поиск и пакетный анализ писем + общий смысл'),
     cmd('/analyze-attachments', 'найти письмо и проанализировать вложения'),
     cmd('/smart-send', 'сгенерировать и отправить письмо по промпту'),
     cmd('/smart-search', 'найти письмо по промпту естественным языком'),

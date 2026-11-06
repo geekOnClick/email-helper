@@ -1,5 +1,5 @@
 /**
- * Команда /analyze-many:批量-поиск писем и анализ каждого + общий смысл
+ * Команда /analyze-many: пакетный поиск писем и анализ каждого + общий смысл
  * (change cli-smart-commands).
  *
  * Тонкий CLI-адаптер (change web-interface, design D1): собирает критерии,
@@ -56,7 +56,7 @@ export async function runAnalyzeManyCommand(deps: AnalyzeManyCommandDeps): Promi
     return;
   }
 
-  // Чистая функция:批量-поиск + фетч тел + анализ (переиспользуется вебом).
+  // Чистая функция: пакетный поиск + фетч тел + анализ (переиспользуется вебом).
   io.write('Анализирую письма...\n');
   try {
     const result = await runAnalyzeMany({

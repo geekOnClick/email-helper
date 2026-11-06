@@ -1,6 +1,6 @@
 # Tasks
 
-## 1. Shared-утилита批量-поиска (перенос `collectAllMessages`)
+## 1. Shared-утилита пакетного поиска (перенос `collectAllMessages`)
 
 - [x] 1.1 Создать `src/transport/cli/commands/search-aggregator.ts`: перенести `collectAllMessages`, `CollectAllMessagesResult`, `CollectAllMessagesOptions`, `matchesLocalFilters`, `normalizeForMatch` из `commands/find-all.ts` без изменения логики
 - [x] 1.2 Реэкспортировать `collectAllMessages` и типы из `commands/index.ts` для обратной совместимости тестов
@@ -56,7 +56,7 @@
 
 ## 9. Тесты — новые команды
 
-- [x] 9.1 Создать `tests/cli-commands-analyze-many.test.ts`:批量-поиск + анализ (mock searchTool/fetchTool/analyzer), усечение по maxEmails, ничего не найдено, отмена, ошибка тулa
+- [x] 9.1 Создать `tests/cli-commands-analyze-many.test.ts`: пакетный поиск + анализ (mock searchTool/fetchTool/analyzer), усечение по maxEmails, ничего не найдено, отмена, ошибка тулa
 - [x] 9.2 Создать `tests/cli-attachment-text.test.ts`: текстовые форматы, HTML stripping, PDF/DOCX/XLSX (mock библиотек или реальные fixtures), пропуск изображения, пропуск бинарного
 - [x] 9.3 Создать `tests/cli-commands-analyze-attachments.test.ts`: письмо с вложениями (mock downloadTool → tmp-пути, mock analyzer), письмо без вложений, ошибка анализа → файлы удаляются (проверка unlink/rmdir), неподдерживаемый формат → пропуск с пометкой
 - [x] 9.4 Создать `tests/cli-commands-smart-send.test.ts`: генерация + отправка с первого раза, цикл правки (redo → новое тело), отмена, ошибка LLM, тема/получатель неизменны при правке

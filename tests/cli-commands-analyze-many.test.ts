@@ -64,7 +64,7 @@ describe('runAnalyzeManyCommand', () => {
     seedSession();
   });
 
-  it('批量-поиск + анализ нескольких писем', async () => {
+  it('пакетный поиск + анализ нескольких писем', async () => {
     const msgs = [
       { uid: 1, subject: 'договор', from: { address: 'a@b.com' }, to: [{ address: 'test@yandex.com' }], date: new Date('2026-10-01'), flags: [], folder: 'INBOX' },
       { uid: 2, subject: 'оплата', from: { address: 'a@b.com' }, to: [{ address: 'test@yandex.com' }], date: new Date('2026-10-02'), flags: [], folder: 'INBOX' },

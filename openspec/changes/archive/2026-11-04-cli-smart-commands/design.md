@@ -24,13 +24,13 @@ MCP-путь (оркестратор + helper + тулы `mail.*`) не меня
 
 ### D1: Перенос `collectAllMessages` в shared-утилиту `search-aggregator.ts`
 
-`collectAllMessages` (включая типы `FindAllSearchArgs`, `CollectAllMessagesResult`, `CollectAllMessagesOptions`) переносится из `commands/find-all.ts` в новый `commands/search-aggregator.ts`. Файлы `find.ts` и `find-all.ts` удаляются. Так `/analyze-many` переиспользует проверенную машину批量-поиска (локальная фильтрация темы/отправителя, пагинация) без дублирования. Мастер `promptFindAllCriteria` остаётся в `prompts.ts` (переиспользуется `/analyze-many`).
+`collectAllMessages` (включая типы `FindAllSearchArgs`, `CollectAllMessagesResult`, `CollectAllMessagesOptions`) переносится из `commands/find-all.ts` в новый `commands/search-aggregator.ts`. Файлы `find.ts` и `find-all.ts` удаляются. Так `/analyze-many` переиспользует проверенную машину пакетного поиска (локальная фильтрация темы/отправителя, пагинация) без дублирования. Мастер `promptFindAllCriteria` остаётся в `prompts.ts` (переиспользуется `/analyze-many`).
 
 **Альтернатива:** дублировать логику в `/analyze-many` — отказались (нарушение DRY, риск расхождения с архивной `/find-all`).
 
 ### D2: `/analyze-many` — один вызов анализатора со всеми телами
 
-После批量-поиска команда фетчит тела всех найденных писем через `mail.fetch` (последовательно, с потолком `ANALYZE_MANY_MAX_EMAILS`), собирает их в одну инструкцию и вызывает `analyzer.run(instruction)` одним вызовом. Анализатор возвращает структурированный ответ: саммари каждого письма + общий смысл (или указание, что общего смысла нет).
+После пакетного поиска команда фетчит тела всех найденных писем через `mail.fetch` (последовательно, с потолком `ANALYZE_MANY_MAX_EMAILS`), собирает их в одну инструкцию и вызывает `analyzer.run(instruction)` одним вызовом. Анализатор возвращает структурированный ответ: саммари каждого письма + общий смысл (или указание, что общего смысла нет).
 
 Потолок `ANALYZE_MANY_MAX_EMAILS` (дефолт 10, из env) ограничивает число фетчей и размер контекста LLM. При превышении — анализ первых N + предупреждение об усечении (как в `/find-all` для пагинации).
 
