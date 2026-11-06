@@ -14,8 +14,6 @@
 | LLM-провайдер | RouterAI (`https://routerai.ru/api/v1`), OpenAI-совместимый |
 | Основная модель | `z-ai/glm-5.2` (оркестратор + анализатор) |
 | Дешёвая модель | `z-ai/glm-5.3-flash` (субагент-помощник) |
-| Embeddings | `baai/bge-m3` |
-| Векторная/графовая БД | FalkorDB (Docker, порт 6380 на хосте) |
 | Почтовые протоколы | IMAP/SMTP (imapflow, nodemailer) |
 | Тестирование | Vitest |
 | SDD | OpenSpec |
@@ -33,30 +31,29 @@
                   │
                   ▼
             Слой тулов (tools)
-        ┌────────────┬─────────────┐
-        │ MailProvider │ FalkorDB    │
-        │ (Yandex/     │ (vector)    │
-        │  Outlook)    │             │
-        └────────────┴─────────────┘
+        ┌────────────┐
+        │ MailProvider │
+        │ (Yandex/     │
+        │  Outlook)    │
+        └────────────┘
 ```
 
 ### Роли агентов
 
 - **Оркестратор** — принимает запрос, разбирает интент, планирует последовательность действий, делегирует субагентам, собирает итоговый ответ. Дорогая модель.
 - **Анализатор** — глубокий анализ содержимого писем, саммари, извлечение сущностей, классификация тематики. Дорогая модель.
-- **Помощник** — рутинные операции: подключение, поиск, скачивание вложений, отправка, работа с папками, индексация. Дешёвая модель.
+- **Помощник** — рутинные операции: подключение, поиск, скачивание вложений, отправка, работа с папками. Дешёвая модель.
 
 ### Ключевые тулы
 
-`mail.connect`, `mail.listFolders`, `mail.search`, `mail.fetch`, `mail.downloadAttachments`, `mail.send`, `embeddings.index`, `vector.search`.
+`mail.connect`, `mail.listFolders`, `mail.search`, `mail.fetch`, `mail.downloadAttachments`, `mail.send`.
 
 ## Составные части
 
 - `src/config/` — zod-схема и loader конфигурации.
-- `src/llm/` — клиент RouterAI, модели, эмбеддинги.
+- `src/llm/` — клиент RouterAI, модели.
 - `src/agents/` — оркестратор + субагенты, цикл tool-calling.
 - `src/tools/mail/` — тулы почты и провайдеры (Yandex, Outlook).
-- `src/tools/vector/` — FalkorDB + embeddings + vector search.
 - `src/transport/cli/` — терминальный REPL (Фаза 5).
 - `src/mcp/` — MCP-сервер, stdio + Streamable HTTP (Фаза 6).
 - `src/observability/` — логгер тулов, статистика сессии (Фаза 8).
@@ -69,5 +66,4 @@
 ## Окружение
 
 - Скопировать `agent-accounts.txt` → `.env` (заполнить значениями).
-- Поднять FalkorDB: `docker compose -f docker/docker-compose.yml up -d`.
 - Проверка: `npm test`, `npm run lint`, `npx tsc --noEmit`.

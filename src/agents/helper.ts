@@ -29,8 +29,6 @@ const HELPER_TOOLS: readonly string[] = [
   'mail.fetch',
   'mail.downloadAttachments',
   'mail.send',
-  'embeddings.index',
-  'vector.search',
 ];
 
 /** Опции конструирования помощника. */

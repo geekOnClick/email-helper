@@ -36,7 +36,6 @@ describe('bootstrap (сборка агента из конфига)', () => {
     const { orchestrator, analyzer, accounts, downloadDir } = await bootstrap({
       env: makeEnv(),
       fetch: mockFetch(),
-      skipFalkor: true,
     });
     const names = orchestrator.getOpenAiTools().map((t) => t.function.name);
     expect(names).toContain('delegate');
@@ -54,7 +53,6 @@ describe('bootstrap (сборка агента из конфига)', () => {
     const { registry, accounts } = await bootstrap({
       env: makeEnv({ ACCOUNTS: accountsJson }),
       fetch: mockFetch(),
-      skipFalkor: true,
     });
     expect(registry).toBeInstanceOf(AccountRegistry);
     expect(registry.list()).toEqual(accounts);
@@ -66,7 +64,6 @@ describe('bootstrap (сборка агента из конфига)', () => {
     const { cleanup } = await bootstrap({
       env: makeEnv(),
       fetch: mockFetch(),
-      skipFalkor: true,
     });
     await expect(cleanup()).resolves.toBeUndefined();
   });
@@ -74,7 +71,7 @@ describe('bootstrap (сборка агента из конфига)', () => {
   it('невалидный конфиг → throw с читаемым сообщением', async () => {
     // Пустой ROUTERAI_API_KEY → zod-ошибка.
     await expect(
-      bootstrap({ env: { ROUTERAI_API_KEY: '' } as NodeJS.ProcessEnv, skipFalkor: true }),
+      bootstrap({ env: { ROUTERAI_API_KEY: '' } as NodeJS.ProcessEnv }),
     ).rejects.toThrow(/конфигурац|ROUTERAI_API_KEY/i);
   });
 
@@ -83,7 +80,6 @@ describe('bootstrap (сборка агента из конфига)', () => {
       bootstrap({
         env: makeEnv({ ACCOUNTS: '{not-json' }),
         fetch: mockFetch(),
-        skipFalkor: true,
       }),
     ).rejects.toThrow(/ACCOUNTS|JSON/i);
   });

@@ -14,8 +14,6 @@
 | LLM-провайдер | RouterAI (`https://routerai.ru/api/v1`), OpenAI-совместимый |
 | Основная модель | `z-ai/glm-5.2` (оркестратор + анализатор) |
 | Дешёвая модель | `z-ai/glm-5.3-flash` (субагент-помощник) |
-| Embeddings | `baai/bge-m3` |
-| Векторная/графовая БД | FalkorDB (Docker, порт 6380 на хосте) |
 | Почтовые протоколы | IMAP/SMTP (imapflow, nodemailer) |
 | Тестирование | Vitest |
 | SDD | OpenSpec |
@@ -26,7 +24,6 @@
 ### Требования
 
 - Node.js ≥ 20 LTS
-- Docker (для FalkorDB)
 
 ### Шаги
 
@@ -35,17 +32,6 @@ git clone <repo-url> email-helper
 cd email-helper
 npm install
 ```
-
-### FalkorDB (векторная БД)
-
-Поднимите FalkorDB через docker-compose:
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-```
-
-Контейнер слушает порт `6380` на хосте (порт 6379 занят другим проектом на
-этой машине). Персистентность — в Docker volume.
 
 ## Конфигурация
 
@@ -61,8 +47,6 @@ cp .env.example .env
 - `ROUTERAI_API_KEY` — API-ключ RouterAI (из кабинета).
 - `ROUTERAI_BASE_URL` — базовый URL API (по умолчанию `https://routerai.ru/api/v1`).
 - `MODEL_ORCHESTRATOR`, `MODEL_ANALYZER`, `MODEL_HELPER` — модели для ролей.
-- `EMBEDDINGS_MODEL` — модель эмбеддингов (`baai/bge-m3`).
-- `FALKORDB_HOST`, `FALKORDB_PORT`, `FALKORDB_PASSWORD` — параметры FalkorDB.
 - `ACCOUNTS` — JSON-массив аккаунтов почты:
   ```json
   [
@@ -212,8 +196,8 @@ npm run mcp:http -- --port 3000 --host 127.0.0.1
 
 ### Инструменты MCP
 
-MCP-сервер экспонирует 8 доменных тулов (внутренний `delegate` оркестратора
-скрыт). Все тулы, кроме `vector.search`, требуют предварительного `mail.connect`
+MCP-сервер экспонирует 6 доменных тулов (внутренний `delegate` оркестратора
+скрыт). Все тулы требуют предварительного `mail.connect`
 для соответствующего `login` — без активной IMAP-сессии возвращается ошибка
 `подключение не установлено для <login>`.
 
@@ -332,31 +316,6 @@ IMAP-сессии при сетевом обрыве/таймауте — до `
 обрывает соединение после больших выборок) и каскадный падёж последующих
 операций. Секреты маскируются в сообщениях об ошибках (`[REDACTED]`).
 
-#### Тулы векторного поиска
-
-| Тул | Назначение | Обязательные параметры |
-|-----|-----------|----------------------|
-| `embeddings.index` | Индексация письма в FalkorDB | `login`, `uid` |
-| `vector.search` | Семантический поиск по смыслу | `query` |
-
-**`embeddings.index`** — индексация письма: строит embedding «тема + тело» и
-сохраняет в FalkorDB. Idempotent (повторный вызов обновляет).
-
-```json
-{ "login": "user@yandex.com", "uid": 42, "folder": "INBOX" }
-```
-
-**`vector.search`** — семантический поиск (без `mail.connect`). Строит embedding
-запроса и возвращает top-k ближайших писем с оценкой.
-
-```json
-{
-  "query": "договор на аренду",
-  "k": 5,
-  "filter": { "login": "user@yandex.com", "folder": "INBOX" }
-}
-```
-
 ### Подключение других агентов (MCP-клиентов)
 
 MCP-сервер поддерживает два транспорта. Выбор зависит от того, где работает
@@ -437,13 +396,9 @@ mcp install http://127.0.0.1:3000/mcp
 #### Предварительные требования
 
 1. **`.env` настроен** — MCP-сервер при старте вызывает `bootstrap()`, который
-   грузит конфигурацию (API-ключи, аккаунты почты, FalkorDB). Без `.env`
+   грузит конфигурацию (API-ключи, аккаунты почты). Без `.env`
    сервер упадёт с ошибкой в stderr.
-2. **FalkorDB запущен** — для тулов `embeddings.index` / `vector.search`:
-   ```bash
-   docker compose -f docker/docker-compose.yml up -d
-   ```
-3. **`mail.connect` первым** — большинство тулов требуют активной IMAP-сессии.
+2. **`mail.connect` первым** — большинство тулов требуют активной IMAP-сессии.
    Типичный flow: `mail.connect` → `mail.search` → `mail.fetch`. Внешний агент
    передаёт только `provider` + `login`; пароль сервер находит в `ACCOUNTS`
    (`.env`) — передача пароля по MCP не предусмотрена. Если аккаунт не заведён,
@@ -452,7 +407,7 @@ mcp install http://127.0.0.1:3000/mcp
    CLI (`/add-account`) и помните: **MCP-сервер требует перезапуска** после
    заведения нового аккаунта (читает `.env` при старте). См. раздел «Инструменты
    MCP» выше.
-4. **Состояние сессий и очистка кредов** — MCP-сервер stateless по HTTP (новый `Server`+
+3. **Состояние сессий и очистка кредов** — MCP-сервер stateless по HTTP (новый `Server`+
    `transport` на запрос), но IMAP-сессии из `mail.connect` живут в общем
    `MailSessionStore` процесса. В stdio — одна сессия на процесс; в HTTP —
    общая на все запросы. При завершении сервера (stdio EOF, SIGINT/SIGTERM,
@@ -461,7 +416,7 @@ mcp install http://127.0.0.1:3000/mcp
    пароли хранятся только в памяти процесса и не сохраняются на диск и не
    передаются третьим лицам (только на IMAP/SMTP-сервер провайдера для
    авторизации).
-5. **`delegate` скрыт** — внутренний тул оркестратора не экспонируется.
+4. **`delegate` скрыт** — внутренний тул оркестратора не экспонируется.
 
 #### Быстрая проверка
 
@@ -495,13 +450,11 @@ email-helper/
 ├── openspec/                 # SDD-спецификации (OpenSpec)
 │   ├── specs/                # зашитые спеки поведения
 │   └── changes/              # активные/архивные изменения
-├── docker/docker-compose.yml # FalkorDB
 ├── src/
 │   ├── agents/               # оркестратор, анализатор, помощник, цикл tool-calling
-│   ├── llm/                  # клиент RouterAI, модели, эмбеддинги
+│   ├── llm/                  # клиент RouterAI, модели
 │   ├── tools/
-│   │   ├── mail/             # тулы почты + провайдеры (yandex, outlook)
-│   │   └── vector/           # FalkorDB + embeddings + vector search
+│   │   └── mail/             # тулы почты + провайдеры (yandex, outlook)
 │   ├── transport/
 │   │   ├── cli/              # терминальный REPL, guided-команды, мастер ввода
 │   │   │   ├── commands/     # обработчики /find /find-all /analyze /download /send

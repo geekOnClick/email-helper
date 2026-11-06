@@ -10,8 +10,6 @@ export { mapToolsToOpenAi, toOpenAiToolName, fromOpenAiToolName } from './tool-m
 export { parseChatResponse, chatCompletionResponseSchema } from './schema.js';
 export type { ChatCompletionResponse, ParsedChatResponse } from './schema.js';
 export { RouterAiError } from './types.js';
-export { EmbeddingsClient, embeddingsResponseSchema } from './embeddings.js';
-export type { EmbeddingsClientOptions, EmbeddingsResponse } from './embeddings.js';
 export type {
   AgentRole,
   ChatMessage,

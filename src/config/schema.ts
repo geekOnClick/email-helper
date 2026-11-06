@@ -29,7 +29,6 @@ export const ConfigSchema = z.object({
   MODEL_ORCHESTRATOR: z.string().default('z-ai/glm-5.2'),
   MODEL_ANALYZER: z.string().default('z-ai/glm-5.2'),
   MODEL_HELPER: z.string().default('z-ai/glm-5.3-flash'),
-  EMBEDDINGS_MODEL: z.string().default('baai/bge-m3'),
 
   // === LLM-клиент: ретраи и таймауты (Фаза 2, llm-client) ===
   LLM_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
@@ -39,11 +38,6 @@ export const ConfigSchema = z.object({
   // === Агенты: границы цикла tool-calling (Фаза 2, orchestrator) ===
   AGENT_MAX_ITERATIONS: z.coerce.number().int().positive().default(10),
   AGENT_MAX_TOOL_RESULT_CHARS: z.coerce.number().int().positive().default(20000),
-
-  // === FalkorDB ===
-  FALKORDB_HOST: z.string().default('localhost'),
-  FALKORDB_PORT: z.coerce.number().int().positive().default(6380),
-  FALKORDB_PASSWORD: z.string().default(''),
 
   // === Аккаунты и пути ===
   // ACCOUNTS — JSON-строка с массивом объектов {provider, login, password, authStrategy}

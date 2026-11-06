@@ -8,7 +8,6 @@ describe('ConfigSchema', () => {
     expect(ok.success).toBe(true);
     if (ok.success) {
       expect(ok.data.MODEL_HELPER).toBe('z-ai/glm-5.3-flash');
-      expect(ok.data.EMBEDDINGS_MODEL).toBe('baai/bge-m3');
     }
   });
 

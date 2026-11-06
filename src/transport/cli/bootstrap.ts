@@ -1,9 +1,9 @@
 /**
  * Bootstrap-сборка агента из конфигурации (Фаза 5, change cli-transport).
  *
- * Грузит конфиг + аккаунты, строит клиенты (RouterAiClient, опц.
- * EmbeddingsClient/FalkorClient), вызывает composeAgents. Возвращает готовый
- * оркестратор и фабрику (для /reset) + cleanup (disposeAll mail-сессий).
+ * Грузит конфиг + аккаунты, строит RouterAiClient, вызывает composeAgents.
+ * Возвращает готовый оркестратор и фабрику (для /reset) + cleanup
+ * (disposeAll mail-сессий).
  *
  * Ошибки конфига/сборки → throw с читаемым сообщением; main() ловит и
  * завершает процесс с ненулевым кодом, не входя в REPL.
@@ -11,8 +11,6 @@
 import { loadConfigWithAccounts } from '../../config/loader.js';
 import { AccountRegistry } from '../../config/account-registry.js';
 import { RouterAiClient } from '../../llm/routerai-client.js';
-import { EmbeddingsClient } from '../../llm/embeddings.js';
-import { FalkorClient } from '../../tools/vector/falkor.js';
 import { composeAgents } from '../../agents/compose.js';
 import { createAnalyzer } from '../../agents/analyzer.js';
 import { getSharedSessionStore } from '../../tools/mail/register-tools.js';
@@ -33,8 +31,6 @@ export interface BootstrapOptions {
   tokenStorePath?: string;
   /** Инжектируемый fetch (для тестов клиентов). */
   fetch?: typeof globalThis.fetch;
-  /** Пропустить инициализацию FalkorDB (для тестов/окружений без БД). */
-  skipFalkor?: boolean;
 }
 
 /** Результат bootstrap: готовый агент, статистика и cleanup. */
@@ -56,7 +52,7 @@ export interface BootstrapResult {
   llmClient: RouterAiClient;
   /** Статистика сессии для REPL (питается toolLogger агента). */
   stats: SessionStats;
-  /** Освобождает занятые ресурсы (mail-сессии, FalkorDB). */
+  /** Освобождает занятые ресурсы (mail-сессии). */
   cleanup: () => Promise<void>;
 }
 
@@ -105,23 +101,6 @@ async function buildAgent(
     opts.fetch ? { config, fetch: opts.fetch } : { config },
   );
 
-  // Векторные клиенты — опциональны (только если FalkorDB доступен).
-  let embeddingsClient: EmbeddingsClient | undefined;
-  let falkorClient: FalkorClient | undefined;
-  if (!opts.skipFalkor) {
-    try {
-      embeddingsClient = new EmbeddingsClient(
-        opts.fetch ? { config, fetch: opts.fetch } : { config },
-      );
-      falkorClient = new FalkorClient({ config });
-      await falkorClient.connect();
-    } catch {
-      // FalkorDB недоступен — агент работает без векторных тулов.
-      falkorClient = undefined;
-      embeddingsClient = undefined;
-    }
-  }
-
   // Статистика сессии + логгер, питающий её (маскирует пароли аккаунтов).
   const stats = new SessionStats();
   const registry = new AccountRegistry(accounts);
@@ -146,8 +125,6 @@ async function buildAgent(
     oauth2,
     tokenStorePath: opts.tokenStorePath ?? config.OAUTH_TOKEN_STORE_PATH,
     downloadDir: config.DOWNLOAD_DIR,
-    embeddingsClient,
-    falkorClient,
     toolLogger,
     mailOpOptions: mailOpOptionsFromConfig(config),
   });
@@ -155,10 +132,9 @@ async function buildAgent(
   // Анализатор для команды /analyze (прямой вызов, вне цикла delegate оркестратора).
   const analyzer = await createAnalyzer({ client, config, toolLogger });
 
-  /** Cleanup: закрывает mail-сессии и FalkorDB. */
+  /** Cleanup: закрывает mail-сессии. */
   const cleanup = async (): Promise<void> => {
     await getSharedSessionStore().disposeAll();
-    if (falkorClient) await falkorClient.close();
   };
 
   return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, fallbackDays: config.MAIL_SEARCH_FALLBACK_DAYS, analyzeManyMaxEmails: config.ANALYZE_MANY_MAX_EMAILS, llmClient: client, stats, cleanup };

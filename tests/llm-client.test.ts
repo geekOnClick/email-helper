@@ -13,13 +13,9 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     MODEL_ORCHESTRATOR: 'z-ai/glm-5.2',
     MODEL_ANALYZER: 'z-ai/glm-5.2',
     MODEL_HELPER: 'z-ai/glm-5.3-flash',
-    EMBEDDINGS_MODEL: 'baai/bge-m3',
     LLM_REQUEST_TIMEOUT_MS: 5000,
     LLM_RETRIES: 3,
     LLM_RETRY_BASE_MS: 1, // минимум для быстрых тестов
-    FALKORDB_HOST: 'localhost',
-    FALKORDB_PORT: 6380,
-    FALKORDB_PASSWORD: '',
     ACCOUNTS: '[]',
     DOWNLOAD_DIR: './downloads',
     MS_CLIENT_ID: '',
