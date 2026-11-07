@@ -23,20 +23,20 @@ export function CommandToolbar(props: Props): JSX.Element {
       <Toolbar>
         {props.accountSelector}
         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button size="small" startIcon={<SearchIcon />} onClick={props.onSmartSearch}>
-            Smart Search
-          </Button>
           <Button size="small" startIcon={<AnalyzeIcon />} onClick={props.onAnalyze}>
             Analyze
-          </Button>
-          <Button size="small" startIcon={<AnalyzeIcon />} onClick={props.onAnalyzeMany}>
-            Analyze Many
           </Button>
           <Button size="small" startIcon={<AnalyzeIcon />} onClick={props.onAnalyzeAttachments}>
             Analyze Attachments
           </Button>
           <Button size="small" startIcon={<SendIcon />} onClick={props.onSmartSend}>
             Smart Send
+          </Button>
+          <Button size="small" startIcon={<AnalyzeIcon />} onClick={props.onAnalyzeMany}>
+            Analyze Many (BETA)
+          </Button>
+          <Button size="small" startIcon={<SearchIcon />} onClick={props.onSmartSearch}>
+            Smart Search (BETA)
           </Button>
           <Button size="small" startIcon={<AddIcon />} onClick={props.onAddAccount}>
             Add Account

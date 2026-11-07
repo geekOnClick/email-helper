@@ -5,6 +5,8 @@ import { ConnectError } from './providers/abstract-imap-provider.js';
 import { createAuthStrategyForAccount, type CreateMailProviderOptions } from './providers/factory.js';
 import { smtpConnectionFor } from './providers/smtp-options.js';
 import { SmtpClient, createDefaultTransport, type SmtpTransportFactory } from './smtp-client.js';
+import { GraphMailTransport, type GraphFetch } from './graph-mail-transport.js';
+import type { FetchLike } from './oauth/device-flow.js';
 import { validateComposeMail } from './compose-mail.js';
 import { redact } from './redact.js';
 import type { AccountRegistry } from '../../config/account-registry.js';
@@ -26,8 +28,12 @@ export interface MailSendDeps {
   accountRegistry: AccountRegistry;
   oauth2?: CreateMailProviderOptions['oauth2'];
   tokenStorePath?: string;
+  /** Инжектируемый fetch для device-flow/Graph (тесты). По умолчанию — globalThis.fetch. */
+  fetchFn?: FetchLike;
   /** Инжектируемая фабрика SMTP-транспорта (тесты). По умолчанию — nodemailer. */
   transportFactory?: SmtpTransportFactory;
+  /** Инжектируемый fetch для Graph API (тесты). По умолчанию — globalThis.fetch. */
+  graphFetch?: GraphFetch;
 }
 
 /** Метаданные вложения в предпросмотре. */
@@ -131,10 +137,30 @@ export function createMailSendTool(deps: MailSendDeps): ToolDef<MailSendArgs> {
       }
 
       // 3. Подтверждено и валидно — отправка.
+      // Для Outlook+oauth2 SMTP AUTH отключён Microsoft security defaults
+      // (535 5.7.3) — отправляем через Microsoft Graph API (/me/sendMail).
+      // Для остальных (basic-аккаунты) — обычный SMTP через nodemailer.
       try {
+        if (account.provider === 'outlook' && account.authStrategy === 'oauth2') {
+          const strategy = createAuthStrategyForAccount(account, {
+            oauth2: deps.oauth2,
+            tokenStorePath: deps.tokenStorePath,
+            ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
+          });
+          const graph = new GraphMailTransport({
+            account,
+            strategy,
+            ...(deps.graphFetch !== undefined ? { fetchFn: deps.graphFetch } : {}),
+          });
+          const { messageId } = await graph.send(args.mail);
+          const recipients = collectRecipients(args.mail);
+          return { ready: true, messageId, recipients };
+        }
+
         const strategy = createAuthStrategyForAccount(account, {
           oauth2: deps.oauth2,
           tokenStorePath: deps.tokenStorePath,
+          ...(deps.fetchFn !== undefined ? { fetchFn: deps.fetchFn } : {}),
         });
         const connection = smtpConnectionFor(account.provider);
         const transportFactory = deps.transportFactory ?? createDefaultTransport;

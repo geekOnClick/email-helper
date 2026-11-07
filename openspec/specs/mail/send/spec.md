@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Отправка писем по SMTP (Яндекс basic, Outlook OAuth2 XOAUTH2) по строгим критериям письма с поддержкой нескольких получателей (TO/CC/BCC), вложений и обязательным подтверждением перед отправкой.
+Отправка писем (Яндекс и Mail.ru — по SMTP basic; Outlook — через Microsoft Graph API) по строгим критериям письма с поддержкой нескольких получателей (TO/CC/BCC), вложений и обязательным подтверждением перед отправкой.
 
 ## Requirements
 
@@ -78,29 +78,29 @@
 - **WHEN** тул вызывается с пустой или отсутствующей темой
 - **THEN** система возвращает ошибку валидации, требующую тему письма
 
-### Requirement: SMTP-аутентификация по провайдеру
+### Requirement: Отправка по провайдеру: SMTP для basic, Graph API для Outlook oauth2
 
-Система SHALL аутентифицироваться на SMTP-сервере провайдера, используя ту же стратегию учётных данных, что и для IMAP: для Яндекс — логин и пароль приложения (`basic`) на `smtp.yandex.ru:465` (TLS); для Outlook — access token через механизм XOAUTH2 (`oauth2`) на SMTP-сервере Outlook, полученный и обновляемый через то же хранилище OAuth2-токенов, что и IMAP; для Mail.ru Group — логин и пароль приложения (`basic`) на `smtp.mail.ru:465` (TLS).
+Система SHALL отправлять письма транспортным путём, зависящим от стратегии аутентификации аккаунта: для Яндекс и Mail.ru Group (стратегия `basic`) — через SMTP-сервер провайдера (`smtp.yandex.ru:465` / `smtp.mail.ru:465`, TLS, логин+пароль приложения) с использованием того же логина/пароля, что и для IMAP; для Outlook (стратегия `oauth2`) — через Microsoft Graph API (`POST /me/sendMail`), поскольку Microsoft отключила SMTP AUTH (XOAUTH2 и basic) для личных @outlook.com аккаунтов политикой security defaults (сервер возвращает `535 5.7.3 Authentication unsuccessful`). Для Graph API SHALL использоваться отдельный access token со scope `https://graph.microsoft.com/Mail.Send`, получаемый и обновляемый через то же хранилище OAuth2-токенов, что и IMAP (refresh token переиспользуется).
 
 #### Scenario: Яндекс SMTP basic
 
 - **WHEN** отправляется письмо с Яндекс-аккаунта (стратегия basic)
 - **THEN** система аутентифицируется на `smtp.yandex.ru:465` логином и паролем приложения
 
-#### Scenario: Outlook SMTP OAuth2
+#### Scenario: Outlook Graph API
 
 - **WHEN** отправляется письмо с Outlook-аккаунта (стратегия oauth2)
-- **THEN** система аутентифицируется на SMTP-сервере Outlook access token через XOAUTH2, переиспользуя refresh token из хранилища
+- **THEN** система отправляет письмо через Microsoft Graph API `/me/sendMail` с Bearer access token (scope `Mail.Send`), переиспользуя refresh token из хранилища; SMTP-сервер Outlook НЕ задействуется
 
 #### Scenario: Mail.ru SMTP basic
 
 - **WHEN** отправляется письмо с аккаунта Mail.ru Group (стратегия basic)
 - **THEN** система аутентифицируется на `smtp.mail.ru:465` (TLS) логином и паролем приложения
 
-#### Scenario: SMTP-сессия независима от IMAP-сессии
+#### Scenario: Транспорт отправки независим от IMAP-сессии
 
 - **WHEN** отправляется письмо при активной IMAP-сессии
-- **THEN** система использует отдельное SMTP-соединение и не нарушает активную IMAP-сессию
+- **THEN** система использует отдельное соединение (SMTP или HTTP для Graph) и не нарушает активную IMAP-сессию
 
 ### Requirement: Безопасное хранение учётных данных при отправке
 

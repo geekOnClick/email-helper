@@ -38,6 +38,13 @@ export interface MSDeviceFlowConfig {
   prompt?: (msg: string) => void;
 }
 
+/**
+ * Scope для IMAP/SMTP (ресурс outlook.office.com). Используется для device code
+ * flow и refresh IMAP-токена. НЕ смешивать со scope Graph (graph.microsoft.com) —
+ * Microsoft запрещает combining scope разных ресурсов в одном запросе токена
+ * (→ 400 invalid scope). Graph-токен (Mail.Send) запрашивается отдельно через
+ * refreshWithScope / отдельный device flow — см. OAuth2MsalStrategy.getGraphAccessToken.
+ */
 const DEFAULT_SCOPE =
   'offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send';
 
@@ -78,14 +85,23 @@ export class MSDeviceFlowClient {
 
   /** Обновление access token через refresh token (grant_type=refresh_token). */
   async refresh(refreshToken: string): Promise<DeviceTokenResponse> {
- const res = await this.fetchFn(`${baseUrl(this.cfg)}/token`, {
+    return this.refreshWithScope(refreshToken, this.scope);
+  }
+
+  /**
+   * Обновление access token с произвольным scope (напр. Graph Mail.Send).
+   * IMAP/SMTP-токен не подходит для Graph — другой ресурс (audience), поэтому
+   * для Graph API запрашивается отдельный токен со scope Graph.
+   */
+  async refreshWithScope(refreshToken: string, scope: string): Promise<DeviceTokenResponse> {
+    const res = await this.fetchFn(`${baseUrl(this.cfg)}/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formEncode({
         grant_type: 'refresh_token',
         client_id: this.cfg.clientId,
         refresh_token: refreshToken,
-        scope: this.scope,
+        scope,
       }),
     });
     const data = (await safeJson(res)) as Record<string, unknown>;
@@ -104,12 +120,21 @@ export class MSDeviceFlowClient {
 
   /** Запрашивает device code и сообщает пользователю URL + user code. */
   async requestDeviceCode(): Promise<DeviceCodeResponse> {
+    return this.requestDeviceCodeWithScope(this.scope);
+  }
+
+  /**
+   * Запрашивает device code с произвольным scope (напр. Graph Mail.Send).
+   * Нужен для получения consent на scope другого ресурса (Graph) — device code
+   * flow с чистым Graph scope, без смешивания с outlook.office.com.
+   */
+  async requestDeviceCodeWithScope(scope: string): Promise<DeviceCodeResponse> {
     const res = await this.fetchFn(`${baseUrl(this.cfg)}/devicecode`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: formEncode({
         client_id: this.cfg.clientId,
-        scope: this.scope,
+        scope,
       }),
     });
 

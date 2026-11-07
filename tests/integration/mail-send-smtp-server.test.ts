@@ -29,7 +29,8 @@ function startCaptureServer(): Promise<{ server: SMTPServer; port: number; mails
   return new Promise((resolve) => {
     const mails: CapturedMail[] = [];
     const server = new SMTPServer({
-      // принимаем любую аутентификацию (PLAID/LOGIN/XOAUTH2) — тест transport, не auth
+      // принимаем любую аутентификацию (PLAIN/LOGIN/XOAUTH2) — тест transport, не auth
+      authMethods: ['PLAIN', 'LOGIN', 'XOAUTH2'],
       onAuth: (_auth, _session, callback) => callback(null, { user: 'test' }),
       // отключаем обязательный STARTTLS — mock-сервер в plaintext для детерминированности
       disabledCommands: ['STARTTLS'],
@@ -207,5 +208,92 @@ describe('mail.send — интеграция с mock SMTP-сервером', () 
     })) as MailSendResult;
     expect(res.ready).toBe(false);
     expect(mails.length).toBe(before);
+  });
+
+  it('Outlook OAuth2 → отправка через Graph API (/me/sendMail), не SMTP', async () => {
+    // Для личных @outlook.com SMTP AUTH отключён Microsoft (535 5.7.3), поэтому
+    // Outlook+oauth2 отправляет через Microsoft Graph API, не через SMTP-сервер.
+    // Мокаем fetch, проверяем что запрос пошёл в Graph, а не на SMTP-порт.
+    const oauthAccount: MailAccount = {
+      provider: 'outlook',
+      login: 'sender@outlook.com',
+      password: 'unused-for-oauth2',
+      authStrategy: 'oauth2',
+    };
+    const store = new MailSessionStore();
+    store.set(oauthAccount, {
+      connect: async () => ({ connected: true, accountId: oauthAccount.login, provider: 'outlook' }),
+      listFolders: async () => [],
+      search: async () => ({ messages: [], total: 0, hasMore: false }),
+      fetch: async () => ({}) as never,
+      downloadAttachments: async () => ({ paths: [], folder: '', uid: 0 }),
+      dispose: async () => undefined,
+    });
+    // Временный token store с валидным refresh token для Graph.
+    const tokenDir = await mkdtemp(join(tmpdir(), 'mail-send-graph-tokens-'));
+    const tokenStorePath = join(tokenDir, 'oauth.json');
+    const { OAuthTokenStore } = await import('../../src/tools/mail/oauth/token-store.js');
+    const tokenStore = new OAuthTokenStore(tokenStorePath);
+    await tokenStore.set(oauthAccount.login, {
+      accessToken: 'imap-token',
+      refreshToken: 'graph-refresh-token',
+      expiresAt: Date.now() + 3600_000,
+    });
+    // Мок fetch: перехватывает Graph /me/sendMail и refresh-token endpoint.
+    // Реализует .json() (для device-flow safeJson) и .text() (для Graph transport).
+    const beforeMails = mails.length;
+    const graphCalls: { url: string; status: number }[] = [];
+    const mockJson = (obj: unknown) => JSON.stringify(obj);
+    const fetchFn = async (url: string, init: { method: string; body: string }) => {
+      const obj = mockJsonBody(url, init.body);
+      return {
+        status: 200,
+        json: async () => obj,
+        text: async () => mockJson(obj),
+      };
+    };
+    // helper: определяет ответ по URL и body
+    function mockJsonBody(url: string, body: string): Record<string, unknown> {
+      if (url.endsWith('/token') && body.includes('refresh_token')) {
+        return {
+          access_token: 'graph-access-token-xyz',
+          refresh_token: 'graph-refresh-token',
+          expires_in: 3600,
+        };
+      }
+      return { error: 'mock: unexpected request' };
+    }
+    // Graph fetch — отдельный перехватчик (GraphMailTransport вызывает его):
+    const graphFetch = async (url: string, _init: { method: string; body: string }) => {
+      if (url.includes('graph.microsoft.com') && url.includes('/sendMail')) {
+        graphCalls.push({ url, status: 202 });
+        return { status: 202, text: async () => '' };
+      }
+      return { status: 404, text: async () => 'not found' };
+    };
+    const tool = createMailSendTool({
+      sessionStore: store,
+      accounts: [oauthAccount],
+      oauth2: { clientId: 'fake-client-id', tenant: 'consumers' },
+      tokenStorePath,
+      fetchFn: fetchFn as never,
+      graphFetch: graphFetch as never,
+    });
+    try {
+      const res = (await tool.handler({
+        login: 'sender@outlook.com',
+        mail: buildMail({ subject: 'Graph API тест', text: 'Тело через Graph' }),
+        confirm: true,
+      })) as MailSendResult;
+      // Отправлено через Graph (не SMTP): mock-сервер ничего не получил.
+      expect(res.ready).toBe(true);
+      expect(res.messageId).toContain('graph-');
+      expect(mails.length).toBe(beforeMails); // SMTP-сервер не задействован
+      // Graph API получил запрос sendMail.
+      expect(graphCalls.length).toBe(1);
+      expect(graphCalls[0]?.url).toContain('graph.microsoft.com/v1.0/me/sendMail');
+    } finally {
+      await rm(tokenDir, { recursive: true, force: true });
+    }
   });
 });

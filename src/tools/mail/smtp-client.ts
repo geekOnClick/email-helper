@@ -43,14 +43,20 @@ export function createDefaultTransport(
     extra?: Record<string, unknown>;
   },
 ): SmtpTransport {
+  // nodemailer 10.x выбирает SASL-метод XOAUTH2 ТОЛЬКО при auth.type='OAUTH2'
+  // (см. smtp-transport getAuth: case 'OAUTH2' создаёт XOAuth2-провайдер из
+  // auth.accessToken, иначе default → LOGIN → ищет user+pass →
+  // «Missing credentials for LOGIN» при OAuth2-аккаунте без пароля).
+  // basic → { user, pass }; oauth2 → { type:'OAUTH2', user, accessToken }.
+  const auth =
+    opts.auth.pass !== undefined
+      ? { user: opts.auth.user, pass: opts.auth.pass }
+      : { type: 'OAUTH2' as const, user: opts.auth.user, accessToken: opts.auth.accessToken };
   const transport = nodemailer.createTransport({
     host: opts.connection.host,
     port: opts.connection.port,
     secure: opts.connection.secure,
-    auth:
-      opts.auth.pass !== undefined
-        ? { user: opts.auth.user, pass: opts.auth.pass }
-        : { user: opts.auth.user, accessToken: opts.auth.accessToken },
+    auth,
     ...(opts.extra ?? {}),
   });
   return transport as unknown as SmtpTransport;

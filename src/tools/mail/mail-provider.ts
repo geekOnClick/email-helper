@@ -50,8 +50,19 @@ export interface AuthStrategy {
    * Возвращает аутентификацию для SMTP (nodemailer): basic → {user, pass},
    * oauth2 → {user, accessToken}. Переиспользует те же учётные данные/токены,
    * что и IMAP (одна стратегия = одни credentials для обоих протоколов).
+   *
+   * Для Outlook oauth2 SMTP AUTH часто отключён политикой security defaults
+   * (535 5.7.3); отправка для таких аккаунтов идёт через Graph API — см.
+   * `getGraphAccessToken` + `GraphMailTransport`.
    */
   getSmtpAuth(account: MailAccount, connection: SmtpConnectionOptions): Promise<SmtpAuth>;
+  /**
+   * Возвращает access token для Microsoft Graph API (`/me/sendMail`).
+   * Только для oauth2-стратегий (Outlook); basic возвращает undefined —
+   * basic-аккаунты (Яндекс/Mail.ru) отправляют через SMTP, Graph не нужен.
+   * Переиспользует тот же token store / refresh, что и IMAP/SMTP.
+   */
+  getGraphAccessToken?(account: MailAccount): Promise<string | undefined>;
 }
 
 /**

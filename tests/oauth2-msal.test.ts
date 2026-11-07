@@ -37,15 +37,29 @@ async function withStore<T>(fn: (store: OAuthTokenStore) => Promise<T>): Promise
 
 function mockDeviceFlow(opts: {
   refresh?: () => Promise<{ accessToken: string; refreshToken: string; expiresInSeconds: number }>;
+  refreshWithScope?: (refreshToken: string, scope: string) => Promise<{ accessToken: string; refreshToken: string; expiresInSeconds: number }>;
   requestDeviceCode?: () => Promise<{ deviceCode: string; userCode: string; verificationUri: string; expiresInSeconds: number; intervalSeconds: number }>;
+  requestDeviceCodeWithScope?: (scope: string) => Promise<{ deviceCode: string; userCode: string; verificationUri: string; expiresInSeconds: number; intervalSeconds: number }>;
   pollForToken?: () => Promise<{ accessToken: string; refreshToken: string; expiresInSeconds: number }>;
 } = {}): MSDeviceFlowClient {
   return {
     refresh: opts.refresh ?? vi.fn().mockRejectedValue(new Error('no refresh')),
+    refreshWithScope:
+      opts.refreshWithScope ??
+      vi.fn().mockRejectedValue(new Error('no refreshWithScope')),
     requestDeviceCode:
       opts.requestDeviceCode ??
       vi.fn().mockResolvedValue({
         deviceCode: 'dc',
+        userCode: 'UC',
+        verificationUri: 'https://microsoft.com/devicelogin',
+        expiresInSeconds: 900,
+        intervalSeconds: 0,
+      }),
+    requestDeviceCodeWithScope:
+      opts.requestDeviceCodeWithScope ??
+      vi.fn().mockResolvedValue({
+        deviceCode: 'dc-graph',
         userCode: 'UC',
         verificationUri: 'https://microsoft.com/devicelogin',
         expiresInSeconds: 900,
@@ -191,6 +205,84 @@ describe('OAuth2MsalStrategy.getSmtpAuth', () => {
     await withStore(async (store) => {
       const strat = new OAuth2MsalStrategy({ clientId: '', tenant: 'consumers' }, store, mockDeviceFlow());
       await expect(strat.getSmtpAuth(account, smtpConnection)).rejects.toThrow(/MS_CLIENT_ID/);
+    });
+  });
+});
+
+describe('OAuth2MsalStrategy.getGraphAccessToken', () => {
+  it('возвращает Graph-токен через refreshWithScope со scope Graph Mail.Send', async () => {
+    await withStore(async (store) => {
+      await store.set(account.login, {
+        accessToken: 'AT-imap',
+        refreshToken: 'RT-stored',
+        expiresAt: Date.now() + 3_600_000,
+      });
+      const flow = mockDeviceFlow({
+        refreshWithScope: vi.fn().mockResolvedValue({
+          accessToken: 'AT-graph',
+          refreshToken: 'RT-new',
+          expiresInSeconds: 3600,
+        }),
+      });
+      const strat = new OAuth2MsalStrategy(cfg, store, flow);
+      const token = await strat.getGraphAccessToken(account);
+      expect(token).toBe('AT-graph');
+      // refreshWithScope вызван со scope Graph Mail.Send
+      expect(flow.refreshWithScope).toHaveBeenCalledWith(
+        'RT-stored',
+        'offline_access https://graph.microsoft.com/Mail.Send',
+      );
+      // новый refreshToken сохранён в store
+      const stored = await store.get(account.login);
+      expect(stored?.refreshToken).toBe('RT-new');
+    });
+  });
+
+  it('возвращает undefined, если refreshWithScope упал (отозван refresh) → device flow', async () => {
+    await withStore(async (store) => {
+      await store.set(account.login, {
+        accessToken: 'AT-imap',
+        refreshToken: 'RT-revoked',
+        expiresAt: Date.now() + 3_600_000,
+      });
+      const flow = mockDeviceFlow({
+        refreshWithScope: vi.fn().mockRejectedValue(new Error('invalid_grant')),
+        requestDeviceCodeWithScope: vi.fn().mockResolvedValue({
+          deviceCode: 'dc-graph',
+          userCode: 'UC',
+          verificationUri: 'https://microsoft.com/devicelogin',
+          expiresInSeconds: 900,
+          intervalSeconds: 0,
+        }),
+        pollForToken: vi.fn().mockResolvedValue({
+          accessToken: 'AT-graph-device',
+          refreshToken: 'RT-graph-new',
+          expiresInSeconds: 3600,
+        }),
+      });
+      const strat = new OAuth2MsalStrategy(cfg, store, flow);
+      const token = await strat.getGraphAccessToken(account);
+      expect(token).toBe('AT-graph-device');
+      // refresh не сработал → device flow с Graph scope
+      expect(flow.refreshWithScope).toHaveBeenCalled();
+      expect(flow.requestDeviceCodeWithScope).toHaveBeenCalledWith(
+        'offline_access https://graph.microsoft.com/Mail.Send',
+      );
+      expect(flow.pollForToken).toHaveBeenCalledWith('dc-graph', 0);
+      // новый refresh token сохранён
+      const stored = await store.get(account.login);
+      expect(stored?.refreshToken).toBe('RT-graph-new');
+    });
+  });
+
+  it('возвращает undefined, если нет refreshToken и device flow упал', async () => {
+    await withStore(async (store) => {
+      const flow = mockDeviceFlow({
+        requestDeviceCodeWithScope: vi.fn().mockRejectedValue(new Error('network')),
+      });
+      const strat = new OAuth2MsalStrategy(cfg, store, flow);
+      const token = await strat.getGraphAccessToken(account);
+      expect(token).toBeUndefined();
     });
   });
 });

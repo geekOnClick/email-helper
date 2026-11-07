@@ -58,6 +58,47 @@ export class OAuth2MsalStrategy implements AuthStrategy {
     return { user: account.login, accessToken };
   }
 
+  /**
+   * Access token для Microsoft Graph API (https://graph.microsoft.com/Mail.Send).
+   * Запрашивает ОТДЕЛЬНЫЙ токен со scope Graph — IMAP/SMTP-токен не подходит
+   * (другой audience), а смешивать scope Graph с outlook.office.com в одном
+   * запросе нельзя (400 invalid scope). Поэтому:
+   *   1. refresh с чистым Graph scope (`offline_access Mail.Send`);
+   *   2. при неудаче (нет consent / отозван refresh) — отдельный device code
+   *      flow с Graph scope для получения consent и нового refresh-токена.
+   * Возвращает access token для Graph или undefined при невозможности.
+   */
+  async getGraphAccessToken(account: MailAccount): Promise<string | undefined> {
+    if (!this.cfg.clientId) return undefined;
+    const GRAPH_SCOPE = 'offline_access https://graph.microsoft.com/Mail.Send';
+    const stored = await this.tokenStore.get(account.login);
+
+    // 1. refresh с Graph scope (если есть сохранённый refresh token)
+    if (stored?.refreshToken) {
+      try {
+        const tok = await this.deviceFlow.refreshWithScope(
+          stored.refreshToken,
+          GRAPH_SCOPE,
+        );
+        await this.persistRefreshed(account.login, tok.refreshToken);
+        return tok.accessToken;
+      } catch {
+        // refresh не прошёл (нет consent на Mail.Send / отозван) → device flow ниже
+      }
+    }
+
+    // 2. device code flow с Graph scope для получения consent на Mail.Send
+    try {
+      const dc = await this.deviceFlow.requestDeviceCodeWithScope(GRAPH_SCOPE);
+      const tok = await this.deviceFlow.pollForToken(dc.deviceCode, dc.intervalSeconds);
+      // сохраняем refresh token (consent на Graph получен, IMAP-токен не трогаем)
+      await this.persistRefreshed(account.login, tok.refreshToken);
+      return tok.accessToken;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async obtainAccessToken(account: MailAccount): Promise<string> {
     const stored = await this.tokenStore.get(account.login);
 
@@ -96,5 +137,13 @@ export class OAuth2MsalStrategy implements AuthStrategy {
       expiresAt: Date.now() + expiresInSeconds * 1000,
     };
     await this.tokenStore.set(login, stored);
+  }
+
+  /** Обновляет только refreshToken в store (для Graph-токенов, чей access не кэшируем). */
+  private async persistRefreshed(login: string, refreshToken: string): Promise<void> {
+    const stored = await this.tokenStore.get(login);
+    if (stored) {
+      await this.tokenStore.set(login, { ...stored, refreshToken });
+    }
   }
 }
