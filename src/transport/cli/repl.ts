@@ -47,6 +47,10 @@ export interface GuidedCommandDeps {
   analyzeManyMaxEmails?: number;
   /** Окно bounded-поиска (дней) для /smart-search без явной даты (MAIL_SEARCH_FALLBACK_DAYS). */
   fallbackDays?: number;
+  /** Потолок глубины поиска (дней назад от сегодня) для старых dateFrom (MAIL_SEARCH_MAX_HISTORY_DAYS). */
+  maxHistoryDays?: number;
+  /** Размер страницы (limit) пакетного поиска (MAIL_SEARCH_PAGE_SIZE). */
+  searchPageSize?: number;
   /** Папка для временных файлов /analyze-attachments (по умолчанию os.tmpdir()). */
   tmpDir?: string;
 }
@@ -71,6 +75,8 @@ export class CliRepl {
   private readonly llmClient: RouterAiClient;
   private readonly analyzeManyMaxEmails?: number;
   private readonly fallbackDays?: number;
+  private readonly maxHistoryDays?: number;
+  private readonly searchPageSize?: number;
   private readonly tmpDir?: string;
   private readonly stats: SessionStats;
   private running = false;
@@ -84,6 +90,8 @@ export class CliRepl {
     this.llmClient = opts.llmClient;
     this.analyzeManyMaxEmails = opts.analyzeManyMaxEmails;
     this.fallbackDays = opts.fallbackDays;
+    this.maxHistoryDays = opts.maxHistoryDays;
+    this.searchPageSize = opts.searchPageSize;
     this.tmpDir = opts.tmpDir;
     this.stats = opts.stats ?? new SessionStats();
   }
@@ -178,6 +186,8 @@ export class CliRepl {
             accounts: this.registry.list(),
             analyzer: this.analyzer,
             maxEmails: this.analyzeManyMaxEmails,
+            maxHistoryDays: this.maxHistoryDays,
+            pageSize: this.searchPageSize,
           }),
         );
         return false;
@@ -208,6 +218,8 @@ export class CliRepl {
             llmClient: this.llmClient,
             maxEmails: this.analyzeManyMaxEmails,
             fallbackDays: this.fallbackDays,
+            maxHistoryDays: this.maxHistoryDays,
+            pageSize: this.searchPageSize,
           }),
         );
         return false;

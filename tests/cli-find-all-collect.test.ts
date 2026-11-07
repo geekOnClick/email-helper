@@ -77,7 +77,7 @@ describe('collectAllMessages', () => {
   it('достижение maxPages → truncated: true', async () => {
     const fullPage = Array.from({ length: 50 }, (_, i) => msg(i + 1, '2024-03-01'));
     const tool = makeSearchTool([{ messages: fullPage, total: 1000, hasMore: true }]);
-    const res = await collectAllMessages(tool, 'login', args(), { maxPages: 3 });
+    const res = await collectAllMessages(tool, 'login', args(), { pageSize: 50, maxPages: 3 });
     expect(res.messages).toHaveLength(150);
     expect(res.truncated).toBe(true);
   });
@@ -101,7 +101,7 @@ describe('collectAllMessages', () => {
         return pages[Math.min(call++, pages.length - 1)] as SearchResult;
       },
     } as unknown as ToolDef;
-    const res = await collectAllMessages(tool, 'login', args());
+    const res = await collectAllMessages(tool, 'login', args(), { pageSize: 50 });
     expect(res.messages).toHaveLength(51);
     expect(seen).toEqual([{ limit: 50, offset: 0 }, { limit: 50, offset: 50 }]);
   });
@@ -117,7 +117,7 @@ describe('collectAllMessages', () => {
         return { messages: [], total: 0, hasMore: false } as SearchResult;
       },
     } as unknown as ToolDef;
-    await collectAllMessages(tool, 'login', args('уроки', 'a@b.com', new Date(2024, 0, 1)));
+    await collectAllMessages(tool, 'login', args('уроки', 'a@b.com', new Date(2024, 0, 1)), { pageSize: 50 });
     expect(receivedCriteria.since).toEqual(new Date(2024, 0, 1));
     expect(receivedCriteria.limit).toBe(50);
     expect(receivedCriteria.offset).toBe(0);
@@ -185,5 +185,20 @@ describe('collectAllMessages', () => {
     const res = await collectAllMessages(tool, 'login', args('несуществующее'));
     expect(res.messages).toHaveLength(0);
     expect(res.truncated).toBe(false);
+  });
+
+  it('дефолт pageSize = 500 (без явного options) — limit 500 в критериях', async () => {
+    let receivedLimit: unknown = undefined;
+    const tool: ToolDef = {
+      name: 'mail.search',
+      description: 'stub',
+      inputSchema: { type: 'object' },
+      handler: async (raw) => {
+        receivedLimit = (raw as { criteria: { limit?: number } }).criteria.limit;
+        return { messages: [], total: 0, hasMore: false } as SearchResult;
+      },
+    } as unknown as ToolDef;
+    await collectAllMessages(tool, 'login', args());
+    expect(receivedLimit).toBe(500);
   });
 });

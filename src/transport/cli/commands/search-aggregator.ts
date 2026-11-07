@@ -19,9 +19,9 @@ import type { FindAllSearchArgs } from '../prompts.js';
 
 /** Параметры пагинации агрегатора сообщений. */
 export interface CollectAllMessagesOptions {
-  /** Размер страницы (limit) для mail.search. По умолчанию 50. */
+  /** Размер страницы (limit) для mail.search. По умолчанию 500. */
   pageSize?: number;
-  /** Максимум страниц (потолок пагинации). По умолчанию 200 (≤10 000 писем). */
+  /** Максимум страниц (потолок пагинации). По умолчанию 200 (≤100 000 писем). */
   maxPages?: number;
 }
 
@@ -79,7 +79,7 @@ export async function collectAllMessages(
   args: FindAllSearchArgs,
   options: CollectAllMessagesOptions = {},
 ): Promise<CollectAllMessagesResult> {
-  const pageSize = options.pageSize ?? 50;
+  const pageSize = options.pageSize ?? 500;
   const maxPages = options.maxPages ?? 200;
 
   const all: EmailMessage[] = [];

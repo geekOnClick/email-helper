@@ -172,21 +172,40 @@ describe('buildSearchArgsFromFindAll', () => {
     expect(args.serverCriteria).not.toHaveProperty('from');
   });
 
-  it('без диапазона — ранний since в serverCriteria (весь ящик)', () => {
+  it('без диапазона — bounded since (now − maxHistoryDays), не 1970', () => {
     const args = buildSearchArgsFromFindAll({ subject: 'договор' });
-    expect(args.serverCriteria.since).toEqual(new Date(1970, 0, 1));
+    expect(args.serverCriteria.since).toBeInstanceOf(Date);
     expect(args.serverCriteria.before).toBeUndefined();
+    // since ≈ now − 1095 дней (3 года), в пределах минуты.
+    const since = args.serverCriteria.since as Date;
+    const expected = Date.now() - 1095 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(since.getTime() - expected)).toBeLessThan(60_000);
   });
 
-  it('только dateFrom — since = полночь dateFrom, без before', () => {
+  it('без диапазона — maxHistoryDays переопределяет потолок глубины', () => {
+    const args = buildSearchArgsFromFindAll({ subject: 'договор' }, 365);
+    const since = args.serverCriteria.since as Date;
+    const expected = Date.now() - 365 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(since.getTime() - expected)).toBeLessThan(60_000);
+  });
+
+  it('только dateFrom (в пределах потолка) — since = полночь dateFrom, без before', () => {
     const args = buildSearchArgsFromFindAll({ dateFrom: '2024-06-01' });
     expect(args.serverCriteria.since).toEqual(new Date(2024, 5, 1));
     expect(args.serverCriteria.before).toBeUndefined();
   });
 
-  it('только dateTo — ранний since + before = следующий день (включительность)', () => {
+  it('старый dateFrom (раньше потолка) — since обрезается к now − maxHistoryDays', () => {
+    // 2010 год раньше потолка 3 года → since = now − 1095дн, не 2010.
+    const args = buildSearchArgsFromFindAll({ dateFrom: '2010-01-01' });
+    const since = args.serverCriteria.since as Date;
+    const expected = Date.now() - 1095 * 24 * 60 * 60 * 1000;
+    expect(Math.abs(since.getTime() - expected)).toBeLessThan(60_000);
+  });
+
+  it('только dateTo — bounded since (now − maxHistoryDays) + before = следующий день (включительность)', () => {
     const args = buildSearchArgsFromFindAll({ dateTo: '2024-12-31' });
-    expect(args.serverCriteria.since).toEqual(new Date(1970, 0, 1));
+    expect(args.serverCriteria.since).toBeInstanceOf(Date);
     // «по 2024-12-31» включительно → before = 2025-01-01 (тул: msg.date >= before → отсев)
     expect(args.serverCriteria.before).toEqual(new Date(2025, 0, 1));
   });
@@ -197,9 +216,9 @@ describe('buildSearchArgsFromFindAll', () => {
     expect(args.serverCriteria.before).toEqual(new Date(2025, 0, 1));
   });
 
-  it('пустые критерии — ранний since, без subject/from', () => {
+  it('пустые критерии — bounded since (now − maxHistoryDays), без subject/from', () => {
     const args = buildSearchArgsFromFindAll({} as FindAllCriteriaInput);
-    expect(args.serverCriteria.since).toEqual(new Date(1970, 0, 1));
+    expect(args.serverCriteria.since).toBeInstanceOf(Date);
     expect(args.serverCriteria.before).toBeUndefined();
     expect(args.subject).toBeUndefined();
     expect(args.from).toBeUndefined();

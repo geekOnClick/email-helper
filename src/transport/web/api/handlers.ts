@@ -49,6 +49,10 @@ export interface ApiContext {
   envPath: string;
   /** Окно bounded-поиска (из конфига). */
   fallbackDays: number;
+  /** Потолок глубины поиска (дней назад от сегодня) для старых dateFrom (из конфига). */
+  maxHistoryDays: number;
+  /** Размер страницы (limit) пакетного поиска (из конфига). */
+  searchPageSize: number;
   /** Потолок числа писем для analyze-many (из конфига). */
   analyzeManyMaxEmails: number;
 }
@@ -189,6 +193,8 @@ export async function smartSearch(ctx: ApiContext, body: unknown): Promise<Handl
       llmClient: ctx.bootstrap.llmClient,
       searchTool,
       fallbackDays: dto.fallbackDays ?? ctx.fallbackDays,
+      maxHistoryDays: dto.maxHistoryDays ?? ctx.maxHistoryDays,
+      pageSize: dto.pageSize ?? ctx.searchPageSize,
       maxEmails: dto.maxEmails ?? ctx.analyzeManyMaxEmails,
     });
     return ok(result);
@@ -289,6 +295,8 @@ export async function analyzeMany(ctx: ApiContext, body: unknown): Promise<Handl
       fetchTool,
       analyzer: ctx.bootstrap.analyzer,
       maxEmails: dto.maxEmails ?? ctx.analyzeManyMaxEmails,
+      maxHistoryDays: dto.maxHistoryDays ?? ctx.maxHistoryDays,
+      pageSize: dto.pageSize ?? ctx.searchPageSize,
     });
     return ok(result);
   } catch (e) {

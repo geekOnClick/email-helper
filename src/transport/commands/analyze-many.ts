@@ -28,6 +28,10 @@ export interface AnalyzeManyDeps {
   fetchTool: ToolDef;
   /** Субагент-анализатор (LLM). */
   analyzer: Subagent;
+  /** Потолок глубины поиска (дней назад от сегодня) для старых dateFrom. По умолчанию 1095 (3 года). */
+  maxHistoryDays?: number;
+  /** Размер страницы (limit) пакетного поиска. По умолчанию 500. */
+  pageSize?: number;
   /** Потолок числа писем для анализа. По умолчанию 10. */
   maxEmails?: number;
 }
@@ -55,8 +59,10 @@ export async function runAnalyzeMany(deps: AnalyzeManyDeps): Promise<AnalyzeMany
   const { accountLogin, searchTool, fetchTool, analyzer } = deps;
   const maxEmails = deps.maxEmails ?? DEFAULT_MAX_EMAILS;
 
-  const args = buildSearchArgsFromFindAll(deps.criteria);
-  const collected = await collectAllMessages(searchTool, accountLogin, args);
+  const args = buildSearchArgsFromFindAll(deps.criteria, deps.maxHistoryDays);
+  const collected = await collectAllMessages(searchTool, accountLogin, args, {
+    ...(deps.pageSize !== undefined ? { pageSize: deps.pageSize } : {}),
+  });
 
   if (collected.messages.length === 0) {
     return {

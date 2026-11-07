@@ -26,6 +26,8 @@ export interface SmartSearchDto {
   accountLogin: string;
   prompt: string;
   fallbackDays?: number;
+  maxHistoryDays?: number;
+  pageSize?: number;
   maxEmails?: number;
 }
 
@@ -57,6 +59,8 @@ export interface AnalyzeManyDto {
     dateTo?: string;
   };
   maxEmails?: number;
+  maxHistoryDays?: number;
+  pageSize?: number;
 }
 
 /** Тело `POST /api/analyze-attachments`. */

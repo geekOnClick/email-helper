@@ -51,6 +51,18 @@ export const ConfigSchema = z.object({
   MAIL_OP_MAX_RETRIES: z.coerce.number().int().nonnegative().default(2),
   // SINCE по умолчанию (в днях) для subject-only поиска — bounded client-side фолбэкк.
   MAIL_SEARCH_FALLBACK_DAYS: z.coerce.number().int().positive().default(180),
+  // Потолок глубины поиска (в днях назад от сегодня) — upper bound для SINCE в
+  // /analyze-many без явной dateFrom (заменя бездонный 1970) и для старых dateFrom
+  // в любых пакетных командах (smart-search/analyze-many). Предотвращает fetch
+  // десятков тысяч писем на больших ящиках. По умолчанию 3 года (1095 дней).
+  MAIL_SEARCH_MAX_HISTORY_DAYS: z.coerce.number().int().positive().default(1095),
+  // Размер страницы (limit) пакетного поиска в /smart-search и /analyze-many.
+  // Каждая страница = один серверный IMAP SEARCH (возвращает ВСЕ UID'ы диапазона)
+  // + FETCH метаданных по N UID'ам. SEARCH повторяется на каждой странице, поэтому
+  // маленький pageSize (50) = множество дорогостоящих повторных SEARCH на больших
+  // ящиках (минуты ожидания). 500 — баланс: 10× меньше повторных SEARCH, FETCH
+  // метаданных по 500 UID'ам (~500КБ) в пределах лимитов команд IMAP.
+  MAIL_SEARCH_PAGE_SIZE: z.coerce.number().int().positive().default(500),
   // === Команды CLI (cli-smart-commands) ===
   // Потолок числа писем для /analyze-many (фетч тел + анализ). При превышении —
   // анализ первых N с предупреждением об усечении.

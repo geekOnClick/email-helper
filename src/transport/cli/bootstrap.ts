@@ -46,6 +46,10 @@ export interface BootstrapResult {
   downloadDir: string;
   /** Окно bounded-поиска (дней) для /find без явной даты (MAIL_SEARCH_FALLBACK_DAYS). */
   fallbackDays: number;
+  /** Потолок глубины поиска (дней назад от сегодня) для старых dateFrom (MAIL_SEARCH_MAX_HISTORY_DAYS). */
+  maxHistoryDays: number;
+  /** Размер страницы (limit) пакетного поиска (MAIL_SEARCH_PAGE_SIZE). */
+  searchPageSize: number;
   /** Потолок числа писем для /analyze-many (ANALYZE_MANY_MAX_EMAILS). */
   analyzeManyMaxEmails: number;
   /** LLM-клиент для /smart-send (прямой one-shot completion, роль helper). */
@@ -137,5 +141,5 @@ async function buildAgent(
     await getSharedSessionStore().disposeAll();
   };
 
-  return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, fallbackDays: config.MAIL_SEARCH_FALLBACK_DAYS, analyzeManyMaxEmails: config.ANALYZE_MANY_MAX_EMAILS, llmClient: client, stats, cleanup };
+  return { orchestrator, analyzer, accounts, registry, downloadDir: config.DOWNLOAD_DIR, fallbackDays: config.MAIL_SEARCH_FALLBACK_DAYS, maxHistoryDays: config.MAIL_SEARCH_MAX_HISTORY_DAYS, searchPageSize: config.MAIL_SEARCH_PAGE_SIZE, analyzeManyMaxEmails: config.ANALYZE_MANY_MAX_EMAILS, llmClient: client, stats, cleanup };
 }

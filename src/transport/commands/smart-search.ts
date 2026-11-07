@@ -32,6 +32,9 @@ export interface ParsedCriteria {
   count?: number;
 }
 
+/** Дефолт потолка глубины поиска (дней назад от сегодня), если не передан — 3 года. */
+const DEFAULT_MAX_HISTORY_DAYS = 1095;
+
 /** DTO команды /smart-search (без ConsoleIO). */
 export interface SmartSearchDeps {
   /** Логин аккаунта для поиска. */
@@ -44,6 +47,10 @@ export interface SmartSearchDeps {
   searchTool: ToolDef;
   /** Окно bounded-поиска (дней) без явной даты. По умолчанию 180. */
   fallbackDays?: number;
+  /** Потолок глубины поиска (дней назад от сегодня) для старых dateFrom. По умолчанию 1095 (3 года). */
+  maxHistoryDays?: number;
+  /** Размер страницы (limit) пакетного поиска. По умолчанию 500. */
+  pageSize?: number;
   /** Потолок числа писем. По умолчанию 10. */
   maxEmails?: number;
 }
@@ -67,11 +74,14 @@ export interface SmartSearchResult {
 export async function runSmartSearch(deps: SmartSearchDeps): Promise<SmartSearchResult> {
   const maxEmails = deps.maxEmails ?? DEFAULT_MAX_EMAILS;
   const fallbackDays = deps.fallbackDays ?? DEFAULT_FALLBACK_DAYS;
+  const maxHistoryDays = deps.maxHistoryDays ?? DEFAULT_MAX_HISTORY_DAYS;
 
   const parsed = await parsePromptToCriteria(deps.llmClient, deps.prompt, maxEmails);
-  const args = buildSearchArgsFromParsed(parsed, fallbackDays);
+  const args = buildSearchArgsFromParsed(parsed, fallbackDays, maxHistoryDays);
 
-  const collected = await collectAllMessages(deps.searchTool, deps.accountLogin, args);
+  const collected = await collectAllMessages(deps.searchTool, deps.accountLogin, args, {
+    ...(deps.pageSize !== undefined ? { pageSize: deps.pageSize } : {}),
+  });
 
   if (collected.messages.length === 0) {
     return { messages: [], count: parsed.count ?? 1, truncated: collected.truncated };
@@ -175,16 +185,18 @@ export async function parsePromptToCriteria(
  *
  * `serverCriteria` = ТОЛЬКО даты; `subject`/`from` локально. При отсутствии даты —
  * bounded-окно `now − fallbackDays`. При `дата_по` → `before` = полночь следующего
- * дня (включительно).
+ * дня (включительно). Старая `дата_с` (раньше `now − maxHistoryDays`) обрезается
+ * к `now − maxHistoryDays` — предотвращает fetch всего ящика с 1970/2010 года.
  */
 export function buildSearchArgsFromParsed(
   parsed: ParsedCriteria,
   fallbackDays: number,
+  maxHistoryDays: number = DEFAULT_MAX_HISTORY_DAYS,
 ): FindAllSearchArgs {
   const server: { since?: Date; before?: Date } = {};
 
   if (parsed.dateFrom) {
-    server.since = isoToDate(parsed.dateFrom);
+    server.since = clampSinceToHistory(isoToDate(parsed.dateFrom), maxHistoryDays);
   } else {
     const since = new Date();
     since.setDate(since.getDate() - fallbackDays);
@@ -202,6 +214,18 @@ export function buildSearchArgsFromParsed(
     subject: parsed.subject,
     from: parsed.from,
   };
+}
+
+/**
+ * Ограничивает «since» потолком глубины поиска: если `since` раньше `now − maxHistoryDays`
+ * — возвращает `now − maxHistoryDays`. Предотвращает fetch всего ящика с 1970/древних
+ * дат на больших ящиках (пакетный поиск по десяткам тысяч писем = минуты ожидания).
+ */
+function clampSinceToHistory(since: Date, maxHistoryDays: number): Date {
+  const ceiling = new Date();
+  ceiling.setDate(ceiling.getDate() - maxHistoryDays);
+  if (since.getTime() < ceiling.getTime()) return ceiling;
+  return since;
 }
 
 /** Парсит ISO YYYY-MM-DD в локальную полночь (без сдвига часового пояса). */

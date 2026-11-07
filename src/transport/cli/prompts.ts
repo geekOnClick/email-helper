@@ -650,26 +650,40 @@ export interface FindAllSearchArgs {
   from?: string;
 }
 
-/** Ранняя дата-«с», когда диапазон не указан — искать по всему ящику. */
-const EARLIEST_SINCE = new Date(1970, 0, 1);
+/** Дефолт потолка глубины поиска (дней назад от сегодня), если не передан — 3 года. */
+const DEFAULT_MAX_HISTORY_DAYS = 1095;
+
+/**
+ * Ограничивает «since» потолком глубины поиска: если `since` раньше `now − maxHistoryDays`
+ * (или undefined) — возвращает `now − maxHistoryDays`. Предотвращает fetch всего ящика
+ * с 1970 года в /analyze-many без явной dateFrom и отсекает слишком старые dateFrom
+ * (напр. «найди письмо за 2010 год» в /smart-search). Без upper-bound пакетный поиск
+ * по большому ящику = тысячи писем × пагинация по 50 = минуты ожидания.
+ */
+function clampSinceToHistory(since: Date | undefined, maxHistoryDays: number): Date {
+  const ceiling = new Date();
+  ceiling.setDate(ceiling.getDate() - maxHistoryDays);
+  if (!since || since.getTime() < ceiling.getTime()) return ceiling;
+  return since;
+}
 
 /**
  * Преобразует критерии /find-all в аргументы для агрегатора:
  * - `serverCriteria` содержит ТОЛЬКО диапазон дат (`since`/`before`), без темы/отправителя —
  *   серверный SEARCH по теме ненадёжен, поэтому ищем все письма диапазона и фильтруем локально;
  * - `дата по` включительно → `before` = полночь следующего дня (тул: `msg.date >= before` → отсев);
- * - `дата с` → `since` = полночь указанного дня;
- * - если диапазон не указан → `since` = 1970-01-01 (весь ящик).
+ * - `дата с` → `since` = полночь указанного дня, ограниченный потолком `maxHistoryDays`
+ *   (старые даты обрезаются к `now − maxHistoryDays`, чтобы не фетчить весь ящик);
+ * - если `дата с` не указана → `since` = `now − maxHistoryDays` (bounded, НЕ 1970);
  * - `subject`/`from` остаются для локальной фильтрации (не идут на сервер).
  */
-export function buildSearchArgsFromFindAll(criteria: FindAllCriteriaInput): FindAllSearchArgs {
+export function buildSearchArgsFromFindAll(
+  criteria: FindAllCriteriaInput,
+  maxHistoryDays: number = DEFAULT_MAX_HISTORY_DAYS,
+): FindAllSearchArgs {
   const server: { since?: Date; before?: Date } = {};
-  if (criteria.dateFrom) {
-    server.since = isoToDate(criteria.dateFrom);
-  } else {
-    // Диапазон не указан — ищем по всему ящику.
-    server.since = EARLIEST_SINCE;
-  }
+  const since = criteria.dateFrom ? isoToDate(criteria.dateFrom) : undefined;
+  server.since = clampSinceToHistory(since, maxHistoryDays);
   if (criteria.dateTo) {
     // «дата по» включительно → before = следующий день.
     const before = isoToDate(criteria.dateTo);

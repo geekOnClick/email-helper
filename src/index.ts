@@ -31,6 +31,8 @@ async function runWebMode(): Promise<void> {
     registry: boot.registry,
     envPath: '.env',
     fallbackDays: boot.fallbackDays,
+    maxHistoryDays: boot.maxHistoryDays,
+    searchPageSize: boot.searchPageSize,
     analyzeManyMaxEmails: boot.analyzeManyMaxEmails,
   };
 
@@ -57,7 +59,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { analyzer, accounts, registry, analyzeManyMaxEmails, fallbackDays, llmClient, stats, cleanup } = await bootstrap();
+  const { analyzer, accounts, registry, analyzeManyMaxEmails, fallbackDays, maxHistoryDays, searchPageSize, llmClient, stats, cleanup } = await bootstrap();
 
   const io = new NodeConsoleIO();
   const repl = new CliRepl({
@@ -69,6 +71,8 @@ async function main(): Promise<void> {
     llmClient,
     analyzeManyMaxEmails,
     fallbackDays,
+    maxHistoryDays,
+    searchPageSize,
     stats,
   });
 

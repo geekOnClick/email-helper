@@ -34,6 +34,10 @@ export interface SmartSearchCommandDeps {
   llmClient: RouterAiClient;
   /** Окно bounded-поиска (дней) без явной даты (MAIL_SEARCH_FALLBACK_DAYS). */
   fallbackDays?: number;
+  /** Потолок глубины поиска (дней назад от сегодня) для старых dateFrom (MAIL_SEARCH_MAX_HISTORY_DAYS). */
+  maxHistoryDays?: number;
+  /** Размер страницы (limit) пакетного поиска (MAIL_SEARCH_PAGE_SIZE). */
+  pageSize?: number;
   /** Потолок числа писем (ANALYZE_MANY_MAX_EMAILS). По умолчанию 10. */
   maxEmails?: number;
 }
@@ -70,6 +74,8 @@ export async function runSmartSearchCommand(deps: SmartSearchCommandDeps): Promi
       llmClient,
       searchTool,
       fallbackDays: deps.fallbackDays,
+      maxHistoryDays: deps.maxHistoryDays,
+      pageSize: deps.pageSize,
       maxEmails: deps.maxEmails,
     });
   } catch (err) {

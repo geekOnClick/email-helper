@@ -26,6 +26,10 @@ export interface AnalyzeManyCommandDeps {
   analyzer: Subagent;
   /** Окно bounded-поиска (дней) без явной даты (MAIL_SEARCH_FALLBACK_DAYS). */
   fallbackDays?: number;
+  /** Потолок глубины поиска (дней назад от сегодня) для старых dateFrom (MAIL_SEARCH_MAX_HISTORY_DAYS). */
+  maxHistoryDays?: number;
+  /** Размер страницы (limit) пакетного поиска (MAIL_SEARCH_PAGE_SIZE). */
+  pageSize?: number;
   /** Потолок числа писем для анализа (ANALYZE_MANY_MAX_EMAILS). По умолчанию 10. */
   maxEmails?: number;
 }
@@ -66,6 +70,8 @@ export async function runAnalyzeManyCommand(deps: AnalyzeManyCommandDeps): Promi
       fetchTool,
       analyzer,
       maxEmails: deps.maxEmails,
+      maxHistoryDays: deps.maxHistoryDays,
+      pageSize: deps.pageSize,
     });
 
     if (result.totalFound === 0) {
